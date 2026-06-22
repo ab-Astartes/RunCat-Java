@@ -1,0 +1,16 @@
+target/
+*.class
+*.jar
+dependency-reduced-pom.xml
+*.log
+.idea/
+*.iml
+.settings/
+.project
+.classpath
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
