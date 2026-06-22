@@ -49,6 +49,13 @@ public class TrayIconManager {
         I18nManager i18n = I18nManager.getInstance();
         PopupMenu menu = new PopupMenu();
 
+        // Dashboard item (top)
+        MenuItem dashboardItem = new MenuItem(i18n.get("dashboard.title"));
+        dashboardItem.addActionListener(e -> DashboardWindow.showOrFocus());
+        menu.add(dashboardItem);
+
+        menu.addSeparator();
+
         // Animation submenu
         Menu animationMenu = new Menu(i18n.get("menu.animation"));
         addAnimationItems(animationMenu);
@@ -60,27 +67,7 @@ public class TrayIconManager {
 
         // Speed submenu
         Menu speedMenu = new Menu(i18n.get("menu.speed"));
-        CheckboxMenuItem slowItem = new CheckboxMenuItem(i18n.get("menu.speed.slow"),
-                config.getSpeedMultiplier() == 0.5);
-        slowItem.addItemListener(e -> {
-            config.setSpeedMultiplier(0.5);
-            updateSpeedMenu(speedMenu);
-        });
-        CheckboxMenuItem normalItem = new CheckboxMenuItem(i18n.get("menu.speed.normal"),
-                config.getSpeedMultiplier() == 1.0);
-        normalItem.addItemListener(e -> {
-            config.setSpeedMultiplier(1.0);
-            updateSpeedMenu(speedMenu);
-        });
-        CheckboxMenuItem fastItem = new CheckboxMenuItem(i18n.get("menu.speed.fast"),
-                config.getSpeedMultiplier() == 2.0);
-        fastItem.addItemListener(e -> {
-            config.setSpeedMultiplier(2.0);
-            updateSpeedMenu(speedMenu);
-        });
-        speedMenu.add(slowItem);
-        speedMenu.add(normalItem);
-        speedMenu.add(fastItem);
+        addSpeedItems(speedMenu);
         menu.add(speedMenu);
 
         // Language submenu
@@ -123,6 +110,15 @@ public class TrayIconManager {
 
         settingsMenu.addSeparator();
 
+        // CPU alert
+        CheckboxMenuItem cpuAlertItem = new CheckboxMenuItem(
+                i18n.get("menu.settings.cpuAlert"), config.isCpuAlertEnabled());
+        cpuAlertItem.addItemListener(e -> config.setCpuAlertEnabled(cpuAlertItem.getState()));
+        settingsMenu.add(cpuAlertItem);
+
+        settingsMenu.addSeparator();
+
+        // Icon theme
         Menu themeMenu = new Menu(i18n.get("menu.settings.iconTheme"));
         CheckboxMenuItem lightItem = new CheckboxMenuItem(
                 i18n.get("menu.settings.iconTheme.light"), "light".equals(config.getIconTheme()));
@@ -152,6 +148,7 @@ public class TrayIconManager {
         // Exit
         MenuItem exitItem = new MenuItem(i18n.get("menu.exit"));
         exitItem.addActionListener(e -> {
+            DashboardWindow.hideInstance();
             stop();
             System.exit(0);
         });
@@ -191,6 +188,22 @@ public class TrayIconManager {
         }
     }
 
+    private void addSpeedItems(Menu speedMenu) {
+        I18nManager i18n = I18nManager.getInstance();
+        double speed = config.getSpeedMultiplier();
+
+        CheckboxMenuItem slowItem = new CheckboxMenuItem(i18n.get("menu.speed.slow"), speed == 0.5);
+        slowItem.addItemListener(e -> { config.setSpeedMultiplier(0.5); updateSpeedMenu(speedMenu); });
+        CheckboxMenuItem normalItem = new CheckboxMenuItem(i18n.get("menu.speed.normal"), speed == 1.0);
+        normalItem.addItemListener(e -> { config.setSpeedMultiplier(1.0); updateSpeedMenu(speedMenu); });
+        CheckboxMenuItem fastItem = new CheckboxMenuItem(i18n.get("menu.speed.fast"), speed == 2.0);
+        fastItem.addItemListener(e -> { config.setSpeedMultiplier(2.0); updateSpeedMenu(speedMenu); });
+
+        speedMenu.add(slowItem);
+        speedMenu.add(normalItem);
+        speedMenu.add(fastItem);
+    }
+
     private void updateSpeedMenu(Menu speedMenu) {
         for (int i = 0; i < speedMenu.getItemCount(); i++) {
             MenuItem item = speedMenu.getItem(i);
@@ -200,16 +213,20 @@ public class TrayIconManager {
         }
         double speed = config.getSpeedMultiplier();
         int idx = speed == 0.5 ? 0 : speed == 2.0 ? 2 : 1;
-        if (speedMenu.getItem(idx) instanceof CheckboxMenuItem) {
-            ((CheckboxMenuItem) speedMenu.getItem(idx)).setState(true);
+        if (idx < speedMenu.getItemCount() && speedMenu.getItem(idx) instanceof CheckboxMenuItem cb) {
+            cb.setState(true);
         }
     }
 
     private void rebuildMenu() {
-        // Rebuild menu by restarting the app UI
         SwingUtilities.invokeLater(() -> {
             popupMenu.removeAll();
             I18nManager i18n = I18nManager.getInstance();
+
+            MenuItem dashboardItem = new MenuItem(i18n.get("dashboard.title"));
+            dashboardItem.addActionListener(e -> DashboardWindow.showOrFocus());
+            popupMenu.add(dashboardItem);
+            popupMenu.addSeparator();
 
             Menu animationMenu = new Menu(i18n.get("menu.animation"));
             addAnimationItems(animationMenu);
@@ -220,18 +237,7 @@ public class TrayIconManager {
             popupMenu.add(animationMenu);
 
             Menu speedMenu = new Menu(i18n.get("menu.speed"));
-            CheckboxMenuItem slowItem = new CheckboxMenuItem(i18n.get("menu.speed.slow"),
-                    config.getSpeedMultiplier() == 0.5);
-            slowItem.addItemListener(e -> { config.setSpeedMultiplier(0.5); updateSpeedMenu(speedMenu); });
-            CheckboxMenuItem normalItem = new CheckboxMenuItem(i18n.get("menu.speed.normal"),
-                    config.getSpeedMultiplier() == 1.0);
-            normalItem.addItemListener(e -> { config.setSpeedMultiplier(1.0); updateSpeedMenu(speedMenu); });
-            CheckboxMenuItem fastItem = new CheckboxMenuItem(i18n.get("menu.speed.fast"),
-                    config.getSpeedMultiplier() == 2.0);
-            fastItem.addItemListener(e -> { config.setSpeedMultiplier(2.0); updateSpeedMenu(speedMenu); });
-            speedMenu.add(slowItem);
-            speedMenu.add(normalItem);
-            speedMenu.add(fastItem);
+            addSpeedItems(speedMenu);
             popupMenu.add(speedMenu);
 
             Menu languageMenu = new Menu(i18n.get("menu.language"));
@@ -263,6 +269,12 @@ public class TrayIconManager {
             settingsMenu.add(memItem);
 
             settingsMenu.addSeparator();
+            CheckboxMenuItem cpuAlertItem = new CheckboxMenuItem(
+                    i18n.get("menu.settings.cpuAlert"), config.isCpuAlertEnabled());
+            cpuAlertItem.addItemListener(e -> config.setCpuAlertEnabled(cpuAlertItem.getState()));
+            settingsMenu.add(cpuAlertItem);
+
+            settingsMenu.addSeparator();
             Menu themeMenu = new Menu(i18n.get("menu.settings.iconTheme"));
             CheckboxMenuItem lightItem = new CheckboxMenuItem(
                     i18n.get("menu.settings.iconTheme.light"), "light".equals(config.getIconTheme()));
@@ -282,7 +294,7 @@ public class TrayIconManager {
             popupMenu.add(aboutItem);
 
             MenuItem exitItem = new MenuItem(i18n.get("menu.exit"));
-            exitItem.addActionListener(e -> { stop(); System.exit(0); });
+            exitItem.addActionListener(e -> { DashboardWindow.hideInstance(); stop(); System.exit(0); });
             popupMenu.add(exitItem);
         });
     }
@@ -310,7 +322,6 @@ public class TrayIconManager {
 
     public void start() throws AWTException {
         systemTray.add(trayIcon);
-        // Apply auto-start setting on startup
         AutoStartManager.setAutoStart(config.isAutoStart());
     }
 
@@ -347,9 +358,7 @@ public class TrayIconManager {
         @Override
         public void mouseClicked(MouseEvent e) {
             if (e.getButton() == MouseEvent.BUTTON1) {
-                // Left click - could show a mini dashboard
-                // For now, just update tooltip immediately
-                updateTooltip();
+                DashboardWindow.showOrFocus();
             }
         }
     }

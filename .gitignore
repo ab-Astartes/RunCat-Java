@@ -1,8 +1,9 @@
 target/
 *.class
-*.jar
-dependency-reduced-pom.xml
 *.log
+dependency-reduced-pom.xml
+dist/
+installer/
 .idea/
 *.iml
 .settings/

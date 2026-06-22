@@ -35,6 +35,15 @@ public class AppConfig {
     // Theme: "light" or "dark" for tray icon
     private String iconTheme = "dark";
 
+    // CPU alert settings
+    private boolean cpuAlertEnabled = true;
+    private double cpuAlertThreshold = 90.0;  // percent
+    private long cpuAlertCooldown = 300;       // seconds between alerts
+
+    // Dashboard window position (persisted)
+    private int dashboardX = -1;
+    private int dashboardY = -1;
+
     public AppConfig() {}
 
     public static AppConfig load() {
@@ -86,4 +95,25 @@ public class AppConfig {
 
     public String getIconTheme() { return iconTheme; }
     public void setIconTheme(String iconTheme) { this.iconTheme = iconTheme; save(); }
+
+    public boolean isCpuAlertEnabled() { return cpuAlertEnabled; }
+    public void setCpuAlertEnabled(boolean cpuAlertEnabled) { this.cpuAlertEnabled = cpuAlertEnabled; save(); }
+
+    public double getCpuAlertThreshold() { return cpuAlertThreshold; }
+    public void setCpuAlertThreshold(double cpuAlertThreshold) { this.cpuAlertThreshold = cpuAlertThreshold; save(); }
+
+    public long getCpuAlertCooldown() { return cpuAlertCooldown; }
+    public void setCpuAlertCooldown(long cpuAlertCooldown) { this.cpuAlertCooldown = cpuAlertCooldown; save(); }
+
+    public int getDashboardX() { return dashboardX; }
+    public void setDashboardX(int dashboardX) { this.dashboardX = dashboardX; }
+
+    public int getDashboardY() { return dashboardY; }
+    public void setDashboardY(int dashboardY) { this.dashboardY = dashboardY; }
+
+    public void saveDashboardPosition(int x, int y) {
+        this.dashboardX = x;
+        this.dashboardY = y;
+        save();
+    }
 }
