@@ -9,12 +9,15 @@ import com.runcat.util.AutoStartManager;
 
 import javax.swing.*;
 import java.awt.*;
-import java.awt.image.BufferedImage;
 import java.awt.event.*;
 import java.util.Map;
 
 /**
  * System tray icon manager - the heart of the UI
+ *
+ * Uses JPopupMenu (Swing) instead of AWT PopupMenu to avoid
+ * native encoding issues on Windows where native.encoding=GBK
+ * causes CJK characters to display as garbled text in AWT menus.
  */
 public class TrayIconManager {
 
@@ -23,7 +26,7 @@ public class TrayIconManager {
     private final AppConfig config;
     private final AnimationManager animationManager;
     private final SystemMonitor systemMonitor;
-    private final PopupMenu popupMenu;
+    private JPopupMenu popupMenu;
 
     public TrayIconManager(AppConfig config, AnimationManager animationManager,
                            SystemMonitor systemMonitor) throws AWTException {
@@ -32,48 +35,48 @@ public class TrayIconManager {
         this.systemMonitor = systemMonitor;
         this.systemTray = SystemTray.getSystemTray();
 
-        // Create popup menu
+        // Create JPopupMenu (Swing - encoding safe)
         this.popupMenu = createPopupMenu();
 
-        // Create tray icon
+        // Create tray icon WITHOUT AWT PopupMenu
         Image initialImage = animationManager.getCurrentFrame();
         if (initialImage == null) {
             initialImage = createDefaultIcon();
         }
-        this.trayIcon = new TrayIcon(initialImage, "Java RunCat", popupMenu);
+        this.trayIcon = new TrayIcon(initialImage, "Java RunCat");
         this.trayIcon.setImageAutoSize(true);
         this.trayIcon.addMouseListener(new TrayIconMouseListener());
     }
 
-    private PopupMenu createPopupMenu() {
+    private JPopupMenu createPopupMenu() {
         I18nManager i18n = I18nManager.getInstance();
-        PopupMenu menu = new PopupMenu();
+        JPopupMenu menu = new JPopupMenu();
 
         // Dashboard item (top)
-        MenuItem dashboardItem = new MenuItem(i18n.get("dashboard.title"));
+        JMenuItem dashboardItem = new JMenuItem(i18n.get("dashboard.title"));
         dashboardItem.addActionListener(e -> DashboardWindow.showOrFocus());
         menu.add(dashboardItem);
 
         menu.addSeparator();
 
         // Animation submenu
-        Menu animationMenu = new Menu(i18n.get("menu.animation"));
+        JMenu animationMenu = new JMenu(i18n.get("menu.animation"));
         addAnimationItems(animationMenu);
         animationMenu.addSeparator();
-        MenuItem customAnimItem = new MenuItem(i18n.get("menu.animation.custom"));
+        JMenuItem customAnimItem = new JMenuItem(i18n.get("menu.animation.custom"));
         customAnimItem.addActionListener(e -> showCustomAnimationDialog());
         animationMenu.add(customAnimItem);
         menu.add(animationMenu);
 
         // Speed submenu
-        Menu speedMenu = new Menu(i18n.get("menu.speed"));
+        JMenu speedMenu = new JMenu(i18n.get("menu.speed"));
         addSpeedItems(speedMenu);
         menu.add(speedMenu);
 
         // Language submenu
-        Menu languageMenu = new Menu(i18n.get("menu.language"));
+        JMenu languageMenu = new JMenu(i18n.get("menu.language"));
         for (String locale : i18n.getSupportedLocales()) {
-            CheckboxMenuItem langItem = new CheckboxMenuItem(
+            JCheckBoxMenuItem langItem = new JCheckBoxMenuItem(
                     i18n.getLocaleDisplayName(locale),
                     locale.equals(config.getLanguage()));
             langItem.addItemListener(e -> {
@@ -87,46 +90,46 @@ public class TrayIconManager {
         menu.addSeparator();
 
         // Settings submenu
-        Menu settingsMenu = new Menu(i18n.get("menu.settings"));
+        JMenu settingsMenu = new JMenu(i18n.get("menu.settings"));
 
-        CheckboxMenuItem autoStartItem = new CheckboxMenuItem(
+        JCheckBoxMenuItem autoStartItem = new JCheckBoxMenuItem(
                 i18n.get("menu.settings.autoStart"), config.isAutoStart());
         autoStartItem.addItemListener(e -> {
-            boolean enabled = autoStartItem.getState();
+            boolean enabled = autoStartItem.isSelected();
             config.setAutoStart(enabled);
             AutoStartManager.setAutoStart(enabled);
         });
         settingsMenu.add(autoStartItem);
 
-        CheckboxMenuItem cpuItem = new CheckboxMenuItem(
+        JCheckBoxMenuItem cpuItem = new JCheckBoxMenuItem(
                 i18n.get("menu.settings.showCpu"), config.isShowCpuTooltip());
-        cpuItem.addItemListener(e -> config.setShowCpuTooltip(cpuItem.getState()));
+        cpuItem.addItemListener(e -> config.setShowCpuTooltip(cpuItem.isSelected()));
         settingsMenu.add(cpuItem);
 
-        CheckboxMenuItem memItem = new CheckboxMenuItem(
+        JCheckBoxMenuItem memItem = new JCheckBoxMenuItem(
                 i18n.get("menu.settings.showMemory"), config.isShowMemoryTooltip());
-        memItem.addItemListener(e -> config.setShowMemoryTooltip(memItem.getState()));
+        memItem.addItemListener(e -> config.setShowMemoryTooltip(memItem.isSelected()));
         settingsMenu.add(memItem);
 
         settingsMenu.addSeparator();
 
         // CPU alert
-        CheckboxMenuItem cpuAlertItem = new CheckboxMenuItem(
+        JCheckBoxMenuItem cpuAlertItem = new JCheckBoxMenuItem(
                 i18n.get("menu.settings.cpuAlert"), config.isCpuAlertEnabled());
-        cpuAlertItem.addItemListener(e -> config.setCpuAlertEnabled(cpuAlertItem.getState()));
+        cpuAlertItem.addItemListener(e -> config.setCpuAlertEnabled(cpuAlertItem.isSelected()));
         settingsMenu.add(cpuAlertItem);
 
         settingsMenu.addSeparator();
 
         // Icon theme
-        Menu themeMenu = new Menu(i18n.get("menu.settings.iconTheme"));
-        CheckboxMenuItem lightItem = new CheckboxMenuItem(
+        JMenu themeMenu = new JMenu(i18n.get("menu.settings.iconTheme"));
+        JCheckBoxMenuItem lightItem = new JCheckBoxMenuItem(
                 i18n.get("menu.settings.iconTheme.light"), "light".equals(config.getIconTheme()));
         lightItem.addItemListener(e -> {
             config.setIconTheme("light");
             RunCatApp.restart();
         });
-        CheckboxMenuItem darkItem = new CheckboxMenuItem(
+        JCheckBoxMenuItem darkItem = new JCheckBoxMenuItem(
                 i18n.get("menu.settings.iconTheme.dark"), "dark".equals(config.getIconTheme()));
         darkItem.addItemListener(e -> {
             config.setIconTheme("dark");
@@ -141,12 +144,12 @@ public class TrayIconManager {
         menu.addSeparator();
 
         // About
-        MenuItem aboutItem = new MenuItem(i18n.get("menu.about"));
+        JMenuItem aboutItem = new JMenuItem(i18n.get("menu.about"));
         aboutItem.addActionListener(e -> showAboutDialog());
         menu.add(aboutItem);
 
         // Exit
-        MenuItem exitItem = new MenuItem(i18n.get("menu.exit"));
+        JMenuItem exitItem = new JMenuItem(i18n.get("menu.exit"));
         exitItem.addActionListener(e -> {
             DashboardWindow.hideInstance();
             stop();
@@ -157,11 +160,10 @@ public class TrayIconManager {
         return menu;
     }
 
-    private void addAnimationItems(Menu animationMenu) {
-        // Built-in animations
+    private void addAnimationItems(JMenu animationMenu) {
         for (Map.Entry<String, java.util.List<Image>> entry :
                 animationManager.getBuiltInAnimations().entrySet()) {
-            CheckboxMenuItem item = new CheckboxMenuItem(
+            JCheckBoxMenuItem item = new JCheckBoxMenuItem(
                     animationManager.getAnimationDisplayName(entry.getKey()),
                     entry.getKey().equals(config.getCurrentAnimation()));
             item.addItemListener(e -> {
@@ -171,12 +173,11 @@ public class TrayIconManager {
             animationMenu.add(item);
         }
 
-        // Custom animations
         Map<String, java.util.List<Image>> customAnims = animationManager.getCustomAnimations();
         if (!customAnims.isEmpty()) {
             animationMenu.addSeparator();
             for (Map.Entry<String, java.util.List<Image>> entry : customAnims.entrySet()) {
-                CheckboxMenuItem item = new CheckboxMenuItem(
+                JCheckBoxMenuItem item = new JCheckBoxMenuItem(
                         animationManager.getAnimationDisplayName(entry.getKey()),
                         entry.getKey().equals(config.getCurrentAnimation()));
                 item.addItemListener(e -> {
@@ -188,15 +189,15 @@ public class TrayIconManager {
         }
     }
 
-    private void addSpeedItems(Menu speedMenu) {
+    private void addSpeedItems(JMenu speedMenu) {
         I18nManager i18n = I18nManager.getInstance();
         double speed = config.getSpeedMultiplier();
 
-        CheckboxMenuItem slowItem = new CheckboxMenuItem(i18n.get("menu.speed.slow"), speed == 0.5);
+        JCheckBoxMenuItem slowItem = new JCheckBoxMenuItem(i18n.get("menu.speed.slow"), speed == 0.5);
         slowItem.addItemListener(e -> { config.setSpeedMultiplier(0.5); updateSpeedMenu(speedMenu); });
-        CheckboxMenuItem normalItem = new CheckboxMenuItem(i18n.get("menu.speed.normal"), speed == 1.0);
+        JCheckBoxMenuItem normalItem = new JCheckBoxMenuItem(i18n.get("menu.speed.normal"), speed == 1.0);
         normalItem.addItemListener(e -> { config.setSpeedMultiplier(1.0); updateSpeedMenu(speedMenu); });
-        CheckboxMenuItem fastItem = new CheckboxMenuItem(i18n.get("menu.speed.fast"), speed == 2.0);
+        JCheckBoxMenuItem fastItem = new JCheckBoxMenuItem(i18n.get("menu.speed.fast"), speed == 2.0);
         fastItem.addItemListener(e -> { config.setSpeedMultiplier(2.0); updateSpeedMenu(speedMenu); });
 
         speedMenu.add(slowItem);
@@ -204,98 +205,57 @@ public class TrayIconManager {
         speedMenu.add(fastItem);
     }
 
-    private void updateSpeedMenu(Menu speedMenu) {
+    private void updateSpeedMenu(JMenu speedMenu) {
         for (int i = 0; i < speedMenu.getItemCount(); i++) {
-            MenuItem item = speedMenu.getItem(i);
-            if (item instanceof CheckboxMenuItem) {
-                ((CheckboxMenuItem) item).setState(false);
+            JMenuItem item = speedMenu.getItem(i);
+            if (item instanceof JCheckBoxMenuItem) {
+                ((JCheckBoxMenuItem) item).setSelected(false);
             }
         }
         double speed = config.getSpeedMultiplier();
         int idx = speed == 0.5 ? 0 : speed == 2.0 ? 2 : 1;
-        if (idx < speedMenu.getItemCount() && speedMenu.getItem(idx) instanceof CheckboxMenuItem cb) {
-            cb.setState(true);
+        if (idx < speedMenu.getItemCount() && speedMenu.getItem(idx) instanceof JCheckBoxMenuItem cb) {
+            cb.setSelected(true);
         }
     }
 
     private void rebuildMenu() {
         SwingUtilities.invokeLater(() -> {
-            popupMenu.removeAll();
-            I18nManager i18n = I18nManager.getInstance();
+            popupMenu = createPopupMenu();
+        });
+    }
 
-            MenuItem dashboardItem = new MenuItem(i18n.get("dashboard.title"));
-            dashboardItem.addActionListener(e -> DashboardWindow.showOrFocus());
-            popupMenu.add(dashboardItem);
-            popupMenu.addSeparator();
+    /**
+     * Show JPopupMenu at the tray icon location.
+     * We need an invisible JFrame to act as the parent for JPopupMenu.show().
+     */
+    private void showPopupMenu() {
+        // Get mouse position on screen
+        Point mouseLoc = MouseInfo.getPointerInfo().getLocation();
+        // Use the invisible frame approach for reliable positioning
+        JDialog invoker = new JDialog();
+        invoker.setUndecorated(true);
+        invoker.setAlwaysOnTop(true);
+        // Position at mouse, size 0x0
+        invoker.setLocation(mouseLoc.x, mouseLoc.y);
+        invoker.setSize(0, 0);
+        invoker.setVisible(true);
 
-            Menu animationMenu = new Menu(i18n.get("menu.animation"));
-            addAnimationItems(animationMenu);
-            animationMenu.addSeparator();
-            MenuItem customAnimItem = new MenuItem(i18n.get("menu.animation.custom"));
-            customAnimItem.addActionListener(e -> showCustomAnimationDialog());
-            animationMenu.add(customAnimItem);
-            popupMenu.add(animationMenu);
+        // Show popup menu at (0,0) relative to the invisible dialog
+        popupMenu.show(invoker, 0, 0);
 
-            Menu speedMenu = new Menu(i18n.get("menu.speed"));
-            addSpeedItems(speedMenu);
-            popupMenu.add(speedMenu);
-
-            Menu languageMenu = new Menu(i18n.get("menu.language"));
-            for (String locale : i18n.getSupportedLocales()) {
-                CheckboxMenuItem langItem = new CheckboxMenuItem(
-                        i18n.getLocaleDisplayName(locale), locale.equals(config.getLanguage()));
-                langItem.addItemListener(e -> { config.setLanguage(locale); RunCatApp.restart(); });
-                languageMenu.add(langItem);
+        // After popup becomes invisible, dispose the invoker
+        popupMenu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
+            @Override
+            public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {}
+            @Override
+            public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) {
+                invoker.dispose();
             }
-            popupMenu.add(languageMenu);
-
-            popupMenu.addSeparator();
-
-            Menu settingsMenu = new Menu(i18n.get("menu.settings"));
-            CheckboxMenuItem autoStartItem = new CheckboxMenuItem(
-                    i18n.get("menu.settings.autoStart"), config.isAutoStart());
-            autoStartItem.addItemListener(e -> {
-                config.setAutoStart(autoStartItem.getState());
-                AutoStartManager.setAutoStart(autoStartItem.getState());
-            });
-            settingsMenu.add(autoStartItem);
-            CheckboxMenuItem cpuItem = new CheckboxMenuItem(
-                    i18n.get("menu.settings.showCpu"), config.isShowCpuTooltip());
-            cpuItem.addItemListener(e -> config.setShowCpuTooltip(cpuItem.getState()));
-            settingsMenu.add(cpuItem);
-            CheckboxMenuItem memItem = new CheckboxMenuItem(
-                    i18n.get("menu.settings.showMemory"), config.isShowMemoryTooltip());
-            memItem.addItemListener(e -> config.setShowMemoryTooltip(memItem.getState()));
-            settingsMenu.add(memItem);
-
-            settingsMenu.addSeparator();
-            CheckboxMenuItem cpuAlertItem = new CheckboxMenuItem(
-                    i18n.get("menu.settings.cpuAlert"), config.isCpuAlertEnabled());
-            cpuAlertItem.addItemListener(e -> config.setCpuAlertEnabled(cpuAlertItem.getState()));
-            settingsMenu.add(cpuAlertItem);
-
-            settingsMenu.addSeparator();
-            Menu themeMenu = new Menu(i18n.get("menu.settings.iconTheme"));
-            CheckboxMenuItem lightItem = new CheckboxMenuItem(
-                    i18n.get("menu.settings.iconTheme.light"), "light".equals(config.getIconTheme()));
-            lightItem.addItemListener(e -> { config.setIconTheme("light"); RunCatApp.restart(); });
-            CheckboxMenuItem darkItem = new CheckboxMenuItem(
-                    i18n.get("menu.settings.iconTheme.dark"), "dark".equals(config.getIconTheme()));
-            darkItem.addItemListener(e -> { config.setIconTheme("dark"); RunCatApp.restart(); });
-            themeMenu.add(lightItem);
-            themeMenu.add(darkItem);
-            settingsMenu.add(themeMenu);
-
-            popupMenu.add(settingsMenu);
-            popupMenu.addSeparator();
-
-            MenuItem aboutItem = new MenuItem(i18n.get("menu.about"));
-            aboutItem.addActionListener(e -> showAboutDialog());
-            popupMenu.add(aboutItem);
-
-            MenuItem exitItem = new MenuItem(i18n.get("menu.exit"));
-            exitItem.addActionListener(e -> { DashboardWindow.hideInstance(); stop(); System.exit(0); });
-            popupMenu.add(exitItem);
+            @Override
+            public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) {
+                invoker.dispose();
+            }
         });
     }
 
@@ -330,7 +290,7 @@ public class TrayIconManager {
     }
 
     private Image createDefaultIcon() {
-        BufferedImage img = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(16, 16, java.awt.image.BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = img.createGraphics();
         g.setColor(Color.ORANGE);
         g.fillOval(2, 2, 12, 12);
@@ -359,6 +319,20 @@ public class TrayIconManager {
         public void mouseClicked(MouseEvent e) {
             if (e.getButton() == MouseEvent.BUTTON1) {
                 DashboardWindow.showOrFocus();
+            }
+        }
+
+        @Override
+        public void mouseReleased(MouseEvent e) {
+            if (e.getButton() == MouseEvent.BUTTON3 || e.isPopupTrigger()) {
+                showPopupMenu();
+            }
+        }
+
+        @Override
+        public void mousePressed(MouseEvent e) {
+            if (e.getButton() == MouseEvent.BUTTON3 || e.isPopupTrigger()) {
+                showPopupMenu();
             }
         }
     }
