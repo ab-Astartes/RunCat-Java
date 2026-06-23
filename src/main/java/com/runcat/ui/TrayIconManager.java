@@ -27,6 +27,7 @@ public class TrayIconManager {
     private final AnimationManager animationManager;
     private final SystemMonitor systemMonitor;
     private JPopupMenu popupMenu;
+    private JWindow invokerWindow;
 
     public TrayIconManager(AppConfig config, AnimationManager animationManager,
                            SystemMonitor systemMonitor) throws AWTException {
@@ -37,6 +38,10 @@ public class TrayIconManager {
 
         // Create JPopupMenu (Swing - encoding safe)
         this.popupMenu = createPopupMenu();
+
+        // Create invisible JWindow as invoker for JPopupMenu
+        this.invokerWindow = new JWindow();
+        this.invokerWindow.setAlwaysOnTop(true);
 
         // Create tray icon WITHOUT AWT PopupMenu
         Image initialImage = animationManager.getCurrentFrame();
@@ -226,36 +231,33 @@ public class TrayIconManager {
     }
 
     /**
-     * Show JPopupMenu at the tray icon location.
-     * We need an invisible JFrame to act as the parent for JPopupMenu.show().
+     * Show JPopupMenu at the mouse cursor position.
+     * Uses a persistent invisible JWindow as the invoker.
+     * Positions the popup above the taskbar (since tray icons are at the bottom).
      */
     private void showPopupMenu() {
-        // Get mouse position on screen
-        Point mouseLoc = MouseInfo.getPointerInfo().getLocation();
-        // Use the invisible frame approach for reliable positioning
-        JDialog invoker = new JDialog();
-        invoker.setUndecorated(true);
-        invoker.setAlwaysOnTop(true);
-        // Position at mouse, size 0x0
-        invoker.setLocation(mouseLoc.x, mouseLoc.y);
-        invoker.setSize(0, 0);
-        invoker.setVisible(true);
+        SwingUtilities.invokeLater(() -> {
+            Point mouseLoc = MouseInfo.getPointerInfo().getLocation();
+            // Position the invisible invoker window at the mouse location
+            invokerWindow.setLocation(mouseLoc.x, mouseLoc.y);
+            invokerWindow.setVisible(true);
 
-        // Show popup menu at (0,0) relative to the invisible dialog
-        popupMenu.show(invoker, 0, 0);
+            // Calculate popup position: above the taskbar, right-aligned
+            Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+            Insets screenInsets = Toolkit.getDefaultToolkit().getScreenInsets(
+                    GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice().getDefaultConfiguration());
+            int taskbarHeight = screenInsets.bottom;
 
-        // After popup becomes invisible, dispose the invoker
-        popupMenu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
-            @Override
-            public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {}
-            @Override
-            public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) {
-                invoker.dispose();
-            }
-            @Override
-            public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) {
-                invoker.dispose();
-            }
+            int x = mouseLoc.x;
+            int y = screenSize.height - taskbarHeight;
+
+            // Show popup at calculated position relative to invoker
+            int offsetX = x - mouseLoc.x;
+            int offsetY = y - mouseLoc.y;
+            popupMenu.show(invokerWindow, offsetX, offsetY);
+
+            // Bring to front
+            popupMenu.requestFocus();
         });
     }
 
@@ -287,6 +289,9 @@ public class TrayIconManager {
 
     public void stop() {
         systemTray.remove(trayIcon);
+        if (invokerWindow != null) {
+            invokerWindow.dispose();
+        }
     }
 
     private Image createDefaultIcon() {
@@ -324,14 +329,14 @@ public class TrayIconManager {
 
         @Override
         public void mouseReleased(MouseEvent e) {
-            if (e.getButton() == MouseEvent.BUTTON3 || e.isPopupTrigger()) {
+            if (SwingUtilities.isRightMouseButton(e) || e.isPopupTrigger()) {
                 showPopupMenu();
             }
         }
 
         @Override
         public void mousePressed(MouseEvent e) {
-            if (e.getButton() == MouseEvent.BUTTON3 || e.isPopupTrigger()) {
+            if (SwingUtilities.isRightMouseButton(e) || e.isPopupTrigger()) {
                 showPopupMenu();
             }
         }
