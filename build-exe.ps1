@@ -55,6 +55,8 @@ $jpackageArgs = @(
     "--description", "A cute running cat animation on your Windows taskbar",
     "--icon", "src/main/resources/icons/app-icon.ico",
     "--java-options", "--enable-native-access=ALL-UNNAMED",
+    "--java-options", "-Dfile.encoding=UTF-8",
+    "--java-options", "-Dsun.jnu.encoding=UTF-8",
     "--dest", "dist"
 )
 

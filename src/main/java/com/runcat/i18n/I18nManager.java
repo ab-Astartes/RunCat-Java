@@ -1,17 +1,16 @@
 package com.runcat.i18n;
 
 import java.io.*;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
- * Multi-language support manager
- * Supports: zh_CN, zh_TW, en, ja
- * 
- * Uses manual properties loading instead of ResourceBundle to avoid
- * jpackage classloader issues where ResourceBundle.getBundle() falls
- * back to the default bundle in packaged applications.
+ * Multi-language support manager.
+ * Supports: zh_CN, zh_TW, en, ja.
+ *
+ * Properties files use Unicode escape sequences for non-ASCII characters,
+ * ensuring correct display in AWT PopupMenu regardless of the JVM's
+ * file.encoding setting (which may be GBK on Chinese Windows when launched
+ * via jpackage).
  */
 public class I18nManager {
 
@@ -22,7 +21,6 @@ public class I18nManager {
     private String currentLocale;
 
     private I18nManager() {
-        // Load fallback (default English) first
         fallbackMessages = loadProperties("i18n/messages.properties");
         setLocale("zh_CN");
     }
@@ -32,7 +30,6 @@ public class I18nManager {
     }
 
     public void setLocale(String localeStr) {
-        // Normalize: treat null/empty/invalid as zh_CN
         if (localeStr == null || localeStr.isBlank()) {
             localeStr = "zh_CN";
         }
@@ -54,7 +51,6 @@ public class I18nManager {
         if (loaded != null && !loaded.isEmpty()) {
             this.messages = loaded;
         } else {
-            // Fallback: try zh_CN
             if (!localeStr.equals("zh_CN")) {
                 Properties zhCn = loadProperties("i18n/messages_zh_CN.properties");
                 if (zhCn != null && !zhCn.isEmpty()) {
@@ -63,70 +59,48 @@ public class I18nManager {
                     return;
                 }
             }
-            // Last resort: use default (English)
             this.messages = new Properties(fallbackMessages);
         }
     }
 
     /**
-     * Load properties file from classpath with UTF-8 encoding
+     * Load properties file from classpath.
+     * Uses Properties.load(InputStream) which natively handles Unicode escapes.
+     * This is encoding-safe regardless of the JVM's file.encoding setting.
      */
     private Properties loadProperties(String resourcePath) {
         Properties props = new Properties();
+        InputStream is = null;
         try {
-            // Try ClassLoader.getResourceAsStream — works reliably in jpackage
-            InputStream is = getClass().getClassLoader().getResourceAsStream(resourcePath);
+            is = getClass().getClassLoader().getResourceAsStream(resourcePath);
             if (is == null) {
-                // Try system classloader
                 is = ClassLoader.getSystemResourceAsStream(resourcePath);
             }
             if (is == null) {
-                // Try context classloader
                 ClassLoader ctx = Thread.currentThread().getContextClassLoader();
                 if (ctx != null) {
                     is = ctx.getResourceAsStream(resourcePath);
                 }
             }
             if (is != null) {
-                try (InputStreamReader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
-                    props.load(reader);
-                }
+                props.load(is);
                 return props;
             }
         } catch (IOException e) {
             // ignore
-        }
-
-        // Fallback: try ResourceBundle mechanism
-        try {
-            String baseName = resourcePath.replace("/", ".").replace(".properties", "");
-            Locale locale = switch (currentLocale != null ? currentLocale : "zh_CN") {
-                case "zh_TW" -> Locale.TRADITIONAL_CHINESE;
-                case "en" -> Locale.ENGLISH;
-                case "ja" -> Locale.JAPANESE;
-                default -> Locale.SIMPLIFIED_CHINESE;
-            };
-            ResourceBundle bundle = ResourceBundle.getBundle(baseName, locale);
-            Enumeration<String> keys = bundle.getKeys();
-            while (keys.hasMoreElements()) {
-                String key = keys.nextElement();
-                props.setProperty(key, bundle.getString(key));
+        } finally {
+            if (is != null) {
+                try { is.close(); } catch (IOException e) { /* ignore */ }
             }
-        } catch (Exception e) {
-            // ignore
         }
-
         return props;
     }
 
     public String get(String key) {
-        // Try current locale first
         String value = messages.getProperty(key);
         if (value != null) return value;
-        // Fallback to default
         value = fallbackMessages.getProperty(key);
         if (value != null) return value;
-        // Return key as last resort
         return key;
     }
 
@@ -144,11 +118,12 @@ public class I18nManager {
     }
 
     public String getLocaleDisplayName(String localeCode) {
+        // Use code points to avoid source-level Unicode escape issues
         return switch (localeCode) {
-            case "zh_CN" -> "简体中文";
-            case "zh_TW" -> "繁體中文";
+            case "zh_CN" -> new String(new int[]{0x7B80, 0x4F53, 0x4E2D, 0x6587}, 0, 4);
+            case "zh_TW" -> new String(new int[]{0x7E41, 0x9AD4, 0x4E2D, 0x6587}, 0, 4);
             case "en" -> "English";
-            case "ja" -> "日本語";
+            case "ja" -> new String(new int[]{0x65E5, 0x672C, 0x8A9E}, 0, 3);
             default -> localeCode;
         };
     }
