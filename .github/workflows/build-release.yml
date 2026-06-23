@@ -24,11 +24,43 @@ jobs:
       - name: Build with Maven
         run: mvn clean package -B
 
-      - name: Upload artifact
+      - name: Generate icons
+        run: java -cp target/classes com.runcat.util.IconGenerator src/main/resources/icons
+
+      - name: Rebuild JAR with resources
+        run: mvn clean package -B
+
+      - name: Build EXE with jpackage
+        run: |
+          $VERSION = "1.0.0"
+          jpackage --type app-image `
+            --name JavaRunCat `
+            --input target `
+            --main-jar "java-runcat-$VERSION.jar" `
+            --main-class com.runcat.RunCatApp `
+            --app-version $VERSION `
+            --vendor "JavaRunCat Team" `
+            --description "A cute running cat animation on your Windows taskbar" `
+            --icon src/main/resources/icons/app-icon.ico `
+            --java-options "--enable-native-access=ALL-UNNAMED" `
+            --java-options "-Dfile.encoding=UTF-8" `
+            --java-options "-Dsun.jnu.encoding=UTF-8" `
+            --dest dist
+
+      - name: Zip EXE distribution
+        run: Compress-Archive -Path dist/JavaRunCat -DestinationPath JavaRunCat-Windows-x64.zip
+
+      - name: Upload JAR artifact
         uses: actions/upload-artifact@v4
         with:
-          name: java-runcat
+          name: java-runcat-jar
           path: target/java-runcat-1.0.0.jar
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: java-runcat-exe
+          path: JavaRunCat-Windows-x64.zip
 
   release:
     needs: build
@@ -36,15 +68,22 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
 
     steps:
-      - name: Download artifact
+      - name: Download JAR
         uses: actions/download-artifact@v4
         with:
-          name: java-runcat
+          name: java-runcat-jar
+
+      - name: Download EXE
+        uses: actions/download-artifact@v4
+        with:
+          name: java-runcat-exe
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: java-runcat-1.0.0.jar
+          files: |
+            java-runcat-1.0.0.jar
+            JavaRunCat-Windows-x64.zip
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

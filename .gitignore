@@ -3,7 +3,7 @@ target/
 *.log
 dependency-reduced-pom.xml
 dist/
-dist_old/
+dist_old*/
 installer/
 .idea/
 *.iml
