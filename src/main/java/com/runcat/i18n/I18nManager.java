@@ -9,19 +9,21 @@ import java.util.*;
  * Multi-language support manager
  * Supports: zh_CN, zh_TW, en, ja
  * 
- * Fix: Clear ResourceBundle cache on locale change to avoid stale cached bundles.
- * Fix: Ensure UTF8Control is used for all bundle lookups including parent chain.
- * Fix: Handle null/invalid locale strings gracefully with zh_CN as default.
+ * Uses manual properties loading instead of ResourceBundle to avoid
+ * jpackage classloader issues where ResourceBundle.getBundle() falls
+ * back to the default bundle in packaged applications.
  */
 public class I18nManager {
 
     private static final I18nManager INSTANCE = new I18nManager();
 
-    private ResourceBundle bundle;
+    private Properties messages;
+    private Properties fallbackMessages;
     private String currentLocale;
-    private static final UTF8Control UTF8_CONTROL = new UTF8Control();
 
     private I18nManager() {
+        // Load fallback (default English) first
+        fallbackMessages = loadProperties("i18n/messages.properties");
         setLocale("zh_CN");
     }
 
@@ -34,45 +36,98 @@ public class I18nManager {
         if (localeStr == null || localeStr.isBlank()) {
             localeStr = "zh_CN";
         }
-        // Only accept known locales
         Set<String> valid = Set.of("zh_CN", "zh_TW", "en", "ja");
         if (!valid.contains(localeStr)) {
             localeStr = "zh_CN";
         }
-        
+
         this.currentLocale = localeStr;
-        Locale locale = switch (localeStr) {
-            case "zh_TW" -> Locale.TRADITIONAL_CHINESE;
-            case "en" -> Locale.ENGLISH;
-            case "ja" -> Locale.JAPANESE;
-            default -> Locale.SIMPLIFIED_CHINESE;
+
+        String resourcePath = switch (localeStr) {
+            case "zh_TW" -> "i18n/messages_zh_TW.properties";
+            case "en" -> "i18n/messages_en.properties";
+            case "ja" -> "i18n/messages_ja.properties";
+            default -> "i18n/messages_zh_CN.properties";
         };
 
-        // Clear ResourceBundle cache to avoid stale cached bundles from previous locale
-        ResourceBundle.clearCache();
-
-        try {
-            this.bundle = ResourceBundle.getBundle("i18n.messages", locale, UTF8_CONTROL);
-        } catch (MissingResourceException e) {
-            // Fallback: try loading zh_CN directly
-            try {
-                this.bundle = ResourceBundle.getBundle("i18n.messages", 
-                    Locale.SIMPLIFIED_CHINESE, UTF8_CONTROL);
-            } catch (MissingResourceException e2) {
-                // Last resort: load default bundle
-                this.bundle = ResourceBundle.getBundle("i18n.messages", 
-                    Locale.ROOT, UTF8_CONTROL);
+        Properties loaded = loadProperties(resourcePath);
+        if (loaded != null && !loaded.isEmpty()) {
+            this.messages = loaded;
+        } else {
+            // Fallback: try zh_CN
+            if (!localeStr.equals("zh_CN")) {
+                Properties zhCn = loadProperties("i18n/messages_zh_CN.properties");
+                if (zhCn != null && !zhCn.isEmpty()) {
+                    this.messages = zhCn;
+                    this.currentLocale = "zh_CN";
+                    return;
+                }
             }
+            // Last resort: use default (English)
+            this.messages = new Properties(fallbackMessages);
         }
     }
 
-    public String get(String key) {
+    /**
+     * Load properties file from classpath with UTF-8 encoding
+     */
+    private Properties loadProperties(String resourcePath) {
+        Properties props = new Properties();
         try {
-            return bundle.getString(key);
-        } catch (MissingResourceException e) {
-            // Try default bundle as fallback for missing keys
-            return key;
+            // Try ClassLoader.getResourceAsStream — works reliably in jpackage
+            InputStream is = getClass().getClassLoader().getResourceAsStream(resourcePath);
+            if (is == null) {
+                // Try system classloader
+                is = ClassLoader.getSystemResourceAsStream(resourcePath);
+            }
+            if (is == null) {
+                // Try context classloader
+                ClassLoader ctx = Thread.currentThread().getContextClassLoader();
+                if (ctx != null) {
+                    is = ctx.getResourceAsStream(resourcePath);
+                }
+            }
+            if (is != null) {
+                try (InputStreamReader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
+                    props.load(reader);
+                }
+                return props;
+            }
+        } catch (IOException e) {
+            // ignore
         }
+
+        // Fallback: try ResourceBundle mechanism
+        try {
+            String baseName = resourcePath.replace("/", ".").replace(".properties", "");
+            Locale locale = switch (currentLocale != null ? currentLocale : "zh_CN") {
+                case "zh_TW" -> Locale.TRADITIONAL_CHINESE;
+                case "en" -> Locale.ENGLISH;
+                case "ja" -> Locale.JAPANESE;
+                default -> Locale.SIMPLIFIED_CHINESE;
+            };
+            ResourceBundle bundle = ResourceBundle.getBundle(baseName, locale);
+            Enumeration<String> keys = bundle.getKeys();
+            while (keys.hasMoreElements()) {
+                String key = keys.nextElement();
+                props.setProperty(key, bundle.getString(key));
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+
+        return props;
+    }
+
+    public String get(String key) {
+        // Try current locale first
+        String value = messages.getProperty(key);
+        if (value != null) return value;
+        // Fallback to default
+        value = fallbackMessages.getProperty(key);
+        if (value != null) return value;
+        // Return key as last resort
+        return key;
     }
 
     public String get(String key, Object... args) {
@@ -96,42 +151,5 @@ public class I18nManager {
             case "ja" -> "日本語";
             default -> localeCode;
         };
-    }
-
-    /**
-     * Custom ResourceBundle.Control to handle UTF-8 properties files.
-     * Overrides getCandidateLocales to ensure proper fallback chain.
-     */
-    private static class UTF8Control extends ResourceBundle.Control {
-        @Override
-        public ResourceBundle newBundle(String baseName, Locale locale, String format,
-                                         ClassLoader loader, boolean reload) throws IOException {
-            String bundleName = toBundleName(baseName, locale);
-            String resourceName = toResourceName(bundleName, "properties");
-            
-            // Try to find the specific locale file first
-            URL url = loader.getResource(resourceName);
-            if (url == null) return null;
-
-            try (InputStream is = url.openStream();
-                 InputStreamReader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
-                return new PropertyResourceBundle(reader);
-            }
-        }
-        
-        @Override
-        public List<Locale> getCandidateLocales(String baseName, Locale locale) {
-            // Custom candidate list to ensure proper fallback:
-            // zh_CN -> zh -> root (default bundle)
-            // en -> root
-            // ja -> root
-            List<Locale> candidates = super.getCandidateLocales(baseName, locale);
-            // Ensure root locale is always in the chain
-            if (!candidates.contains(Locale.ROOT)) {
-                candidates = new ArrayList<>(candidates);
-                candidates.add(Locale.ROOT);
-            }
-            return candidates;
-        }
     }
 }
