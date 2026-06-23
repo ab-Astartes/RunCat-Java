@@ -6,6 +6,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -66,24 +69,26 @@ jobs:
     needs: build
     runs-on: windows-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
 
     steps:
       - name: Download JAR
         uses: actions/download-artifact@v4
         with:
           name: java-runcat-jar
+          path: ./release-assets
 
       - name: Download EXE
         uses: actions/download-artifact@v4
         with:
           name: java-runcat-exe
+          path: ./release-assets
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          files: |
-            java-runcat-1.0.0.jar
-            JavaRunCat-Windows-x64.zip
+          files: ./release-assets/*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
