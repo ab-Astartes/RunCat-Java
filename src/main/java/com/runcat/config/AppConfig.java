@@ -75,7 +75,9 @@ public class AppConfig {
     }
 
     // Getters and Setters
-    public String getLanguage() { return language; }
+    public String getLanguage() { 
+        return (language == null || language.isBlank()) ? "zh_CN" : language; 
+    }
     public void setLanguage(String language) { this.language = language; save(); }
 
     public String getCurrentAnimation() { return currentAnimation; }
