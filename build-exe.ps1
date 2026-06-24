@@ -2,7 +2,7 @@
 # Requires: JDK 17+ with jpackage, Maven
 $ErrorActionPreference = "Stop"
 
-$VERSION = "1.0.0"
+$VERSION = "1.2.0"
 $APP_NAME = "JavaRunCat"
 $VENDOR = "JavaRunCat Team"
 $MAIN_CLASS = "com.runcat.RunCatApp"

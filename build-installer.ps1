@@ -2,7 +2,7 @@
 # Requires: JDK 17+ with jpackage, WiX Toolset (for MSI) or Inno Setup (for EXE)
 $ErrorActionPreference = "Stop"
 
-$VERSION = "1.0.0"
+$VERSION = "1.2.0"
 $APP_NAME = "JavaRunCat"
 
 # First ensure app-image is built
