@@ -28,12 +28,15 @@ public class AnimationManager {
 
     private final Map<String, List<Image>> builtInAnimations;
     private final Map<String, List<Image>> customAnimations;
+    private final Map<String, List<Image>> hiResCache; // 64x64 frames for desktop pet
 
     public AnimationManager(AppConfig config) {
         this.config = config;
         this.builtInAnimations = new LinkedHashMap<>();
         this.customAnimations = new LinkedHashMap<>();
+        this.hiResCache = new LinkedHashMap<>();
         loadBuiltInAnimations();
+        loadHiResAnimations();
         loadCustomAnimations();
         setCurrentAnimation(config.getCurrentAnimation());
     }
@@ -105,6 +108,26 @@ public class AnimationManager {
             frames.add(img);
         }
         return frames;
+    }
+
+    private void loadHiResAnimations() {
+        String[] names = {"cat", "cat_sleep", "dog", "horse", "parrot", "rabbit", "penguin"};
+        for (String name : names) {
+            List<Image> frames = new ArrayList<>();
+            for (int i = 0; i < 20; i++) {
+                String path = "/animations_hd/" + name + "/" + name + "_" + i + ".png";
+                try (InputStream is = getClass().getResourceAsStream(path)) {
+                    if (is == null) break;
+                    BufferedImage img = ImageIO.read(is);
+                    if (img != null) frames.add(img);
+                } catch (IOException e) {
+                    break;
+                }
+            }
+            if (!frames.isEmpty()) {
+                hiResCache.put(name, frames);
+            }
+        }
     }
 
     private void loadCustomAnimations() {
@@ -254,5 +277,30 @@ public class AnimationManager {
             return "\uD83D\uDCE6 " + name;
         }
         return value;
+    }
+
+    /**
+     * Get the next hi-res (64x64) frame for the desktop pet.
+     * Uses the same animation as the tray icon.
+     */
+    public Image getNextHiResFrame() {
+        String current = config.getCurrentAnimation();
+        List<Image> frames = hiResCache.get(current);
+        if (frames == null || frames.isEmpty()) {
+            // Fallback: scale up from 16x16
+            Image loRes = getNextFrame();
+            if (loRes == null) return null;
+            BufferedImage scaled = new BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = scaled.createGraphics();
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.drawImage(loRes, 0, 0, 64, 64, null);
+            g.dispose();
+            return scaled;
+        }
+        // Use a separate frame counter for hi-res
+        // Just cycle using currentFrameIndex since it's already incremented by getNextFrame()
+        int idx = (currentFrameIndex - 1 + frames.size()) % frames.size();
+        return frames.get(idx);
     }
 }

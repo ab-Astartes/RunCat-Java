@@ -47,6 +47,13 @@ public class AppConfig {
     private int dashboardX = -1;
     private int dashboardY = -1;
 
+    // Desktop pet mode (floating window like QQ pet)
+    private boolean desktopPetEnabled = true;
+    private int desktopPetSize = 64;           // pixel size of the pet
+    private int desktopPetX = -1;
+    private int desktopPetY = -1;
+    private double desktopPetOpacity = 1.0;    // 0.0 ~ 1.0
+
     public AppConfig() {}
 
     public static AppConfig load() {
@@ -122,6 +129,27 @@ public class AppConfig {
     public void saveDashboardPosition(int x, int y) {
         this.dashboardX = x;
         this.dashboardY = y;
+        save();
+    }
+
+    public boolean isDesktopPetEnabled() { return desktopPetEnabled; }
+    public void setDesktopPetEnabled(boolean desktopPetEnabled) { this.desktopPetEnabled = desktopPetEnabled; save(); }
+
+    public int getDesktopPetSize() { return desktopPetSize; }
+    public void setDesktopPetSize(int desktopPetSize) { this.desktopPetSize = desktopPetSize; save(); }
+
+    public int getDesktopPetX() { return desktopPetX; }
+    public void setDesktopPetX(int desktopPetX) { this.desktopPetX = desktopPetX; }
+
+    public int getDesktopPetY() { return desktopPetY; }
+    public void setDesktopPetY(int desktopPetY) { this.desktopPetY = desktopPetY; }
+
+    public double getDesktopPetOpacity() { return desktopPetOpacity; }
+    public void setDesktopPetOpacity(double desktopPetOpacity) { this.desktopPetOpacity = desktopPetOpacity; save(); }
+
+    public void saveDesktopPetPosition(int x, int y) {
+        this.desktopPetX = x;
+        this.desktopPetY = y;
         save();
     }
 }

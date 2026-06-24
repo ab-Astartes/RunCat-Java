@@ -1,6 +1,7 @@
 package com.runcat;
 
 import com.runcat.core.SystemMonitor;
+import com.runcat.ui.DesktopPetWindow;
 import com.runcat.ui.TrayIconManager;
 import com.runcat.config.AppConfig;
 import com.runcat.i18n.I18nManager;
@@ -75,6 +76,10 @@ public class RunCatApp {
                 startAnimationLoop();
                 startCpuMonitorLoop();
                 startThemeWatcher();
+                // Desktop pet window
+                if (appConfig.isDesktopPetEnabled()) {
+                    DesktopPetWindow.showOrFocus();
+                }
             } catch (AWTException e) {
                 I18nManager i18n = I18nManager.getInstance();
                 JOptionPane.showMessageDialog(null,
@@ -86,6 +91,7 @@ public class RunCatApp {
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             running = false;
+            DesktopPetWindow.hideInstance();
             if (trayIconManager != null) trayIconManager.stop();
             releaseInstanceLock();
         }));
@@ -223,6 +229,7 @@ public class RunCatApp {
     public static AnimationManager getAnimationManager() { return animationManager; }
 
     public static void restart() {
+        DesktopPetWindow.hideInstance();
         if (trayIconManager != null) trayIconManager.stop();
         SwingUtilities.invokeLater(() -> {
             try {
@@ -230,6 +237,9 @@ public class RunCatApp {
                 animationManager = new AnimationManager(appConfig);
                 trayIconManager = new TrayIconManager(appConfig, animationManager, systemMonitor);
                 trayIconManager.start();
+                if (appConfig.isDesktopPetEnabled()) {
+                    DesktopPetWindow.showOrFocus();
+                }
             } catch (AWTException e) {
                 e.printStackTrace();
             }

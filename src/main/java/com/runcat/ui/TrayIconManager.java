@@ -59,6 +59,19 @@ public class TrayIconManager {
         dashboardItem.addActionListener(e -> DashboardWindow.showOrFocus());
         menu.add(dashboardItem);
 
+        // Desktop Pet toggle
+        JCheckBoxMenuItem petItem = new JCheckBoxMenuItem(
+                i18n.get("pet.toggle"), config.isDesktopPetEnabled());
+        petItem.addItemListener(e -> {
+            config.setDesktopPetEnabled(petItem.isSelected());
+            if (petItem.isSelected()) {
+                DesktopPetWindow.showOrFocus();
+            } else {
+                DesktopPetWindow.hideInstance();
+            }
+        });
+        menu.add(petItem);
+
         menu.addSeparator();
 
         // Animation submenu
