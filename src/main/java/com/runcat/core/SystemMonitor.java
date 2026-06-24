@@ -5,10 +5,13 @@ import com.runcat.config.AppConfig;
 import com.runcat.i18n.I18nManager;
 
 import java.awt.*;
-import java.util.LinkedList;
+import java.io.*;
+import java.nio.file.*;
+import java.util.*;
 
 /**
- * Monitors system CPU and memory usage with history tracking and alerts
+ * Monitors system CPU, memory, disk I/O, and network usage
+ * with history tracking and alerts
  */
 public class SystemMonitor {
 
@@ -24,11 +27,27 @@ public class SystemMonitor {
     // CPU alert cooldown tracking
     private long lastAlertTime = 0;
 
+    // Disk I/O tracking
+    private long lastDiskReadBytes = 0;
+    private long lastDiskWriteBytes = 0;
+    private double diskReadKBps = 0;
+    private double diskWriteKBps = 0;
+    private long lastDiskSampleTime = 0;
+
+    // Network tracking
+    private long lastNetBytesSent = 0;
+    private long lastNetBytesRecv = 0;
+    private double netUploadKBps = 0;
+    private double netDownloadKBps = 0;
+    private long lastNetSampleTime = 0;
+
     public SystemMonitor() {
         this.osBean = (com.sun.management.OperatingSystemMXBean)
                 java.lang.management.ManagementFactory.getOperatingSystemMXBean();
         this.cpuUsage = 0;
         this.memoryUsage = 0;
+        this.lastDiskSampleTime = System.currentTimeMillis();
+        this.lastNetSampleTime = System.currentTimeMillis();
     }
 
     public void update() {
@@ -49,8 +68,100 @@ public class SystemMonitor {
         memHistory.addLast(memoryUsage);
         if (memHistory.size() > HISTORY_SIZE) memHistory.removeFirst();
 
+        // Update disk and network stats
+        updateDiskStats();
+        updateNetworkStats();
+
         // Check CPU alert
         checkCpuAlert();
+    }
+
+    private void updateDiskStats() {
+        try {
+            // Use Windows performance counter via wmic
+            ProcessBuilder pb = new ProcessBuilder("wmic", "logicaldisk", "get", "ReadBytesPerSec,WriteBytesPerSec", "/format:value");
+            Process p = pb.start();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            long totalRead = 0, totalWrite = 0;
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (line.startsWith("ReadBytesPerSec=")) {
+                    try { totalRead += Long.parseLong(line.substring(16)); } catch (NumberFormatException ignored) {}
+                } else if (line.startsWith("WriteBytesPerSec=")) {
+                    try { totalWrite += Long.parseLong(line.substring(17)); } catch (NumberFormatException ignored) {}
+                }
+            }
+            p.waitFor();
+
+            long now = System.currentTimeMillis();
+            double elapsed = (now - lastDiskSampleTime) / 1000.0;
+            if (elapsed > 0 && lastDiskReadBytes > 0) {
+                diskReadKBps = (totalRead - lastDiskReadBytes) / 1024.0 / elapsed;
+                diskWriteKBps = (totalWrite - lastDiskWriteBytes) / 1024.0 / elapsed;
+                if (diskReadKBps < 0) diskReadKBps = 0;
+                if (diskWriteKBps < 0) diskWriteKBps = 0;
+            }
+            lastDiskReadBytes = totalRead;
+            lastDiskWriteBytes = totalWrite;
+            lastDiskSampleTime = now;
+        } catch (Exception e) {
+            // Fallback: use simple file store stats
+            updateDiskStatsFallback();
+        }
+    }
+
+    private void updateDiskStatsFallback() {
+        try {
+            long totalRead = 0, totalWrite = 0;
+            for (Path root : FileSystems.getDefault().getRootDirectories()) {
+                FileStore store = Files.getFileStore(root);
+                totalRead += store.getTotalSpace() - store.getUsableSpace();
+            }
+            long now = System.currentTimeMillis();
+            double elapsed = (now - lastDiskSampleTime) / 1000.0;
+            if (elapsed > 0 && lastDiskReadBytes > 0) {
+                diskReadKBps = Math.abs(totalRead - lastDiskReadBytes) / 1024.0 / elapsed;
+            }
+            lastDiskReadBytes = totalRead;
+            lastDiskWriteBytes = totalWrite;
+            lastDiskSampleTime = now;
+        } catch (Exception ignored) {}
+    }
+
+    private void updateNetworkStats() {
+        try {
+            // Read from /proc/net/dev equivalent on Windows via netstat or wmic
+            ProcessBuilder pb = new ProcessBuilder("wmic", "path", "Win32_PerfRawData_Tcpip_NetworkInterface",
+                    "get", "BytesReceivedPerSec,BytesSentPerSec", "/format:value");
+            Process p = pb.start();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            long totalRecv = 0, totalSent = 0;
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (line.startsWith("BytesReceivedPerSec=")) {
+                    try { totalRecv += Long.parseLong(line.substring(20)); } catch (NumberFormatException ignored) {}
+                } else if (line.startsWith("BytesSentPerSec=")) {
+                    try { totalSent += Long.parseLong(line.substring(16)); } catch (NumberFormatException ignored) {}
+                }
+            }
+            p.waitFor();
+
+            long now = System.currentTimeMillis();
+            double elapsed = (now - lastNetSampleTime) / 1000.0;
+            if (elapsed > 0 && lastNetBytesRecv > 0) {
+                netDownloadKBps = (totalRecv - lastNetBytesRecv) / 1024.0 / elapsed;
+                netUploadKBps = (totalSent - lastNetBytesSent) / 1024.0 / elapsed;
+                if (netDownloadKBps < 0) netDownloadKBps = 0;
+                if (netUploadKBps < 0) netUploadKBps = 0;
+            }
+            lastNetBytesRecv = totalRecv;
+            lastNetBytesSent = totalSent;
+            lastNetSampleTime = now;
+        } catch (Exception ignored) {
+            // Network stats unavailable - show N/A
+        }
     }
 
     private void checkCpuAlert() {
@@ -64,11 +175,9 @@ public class SystemMonitor {
                 && (now - lastAlertTime) > cooldownMs) {
             lastAlertTime = now;
             I18nManager i18n = I18nManager.getInstance();
-            // Use system tray notification
             if (SystemTray.isSupported()) {
                 try {
                     SystemTray tray = SystemTray.getSystemTray();
-                    // Use a temporary TrayIcon for the notification
                     Image img = Toolkit.getDefaultToolkit().createImage("");
                     TrayIcon notifyIcon = new TrayIcon(img);
                     notifyIcon.setImageAutoSize(true);
@@ -77,7 +186,6 @@ public class SystemMonitor {
                             i18n.get("notification.cpuHigh.title"),
                             i18n.get("notification.cpuHigh", getCpuUsageText()),
                             TrayIcon.MessageType.WARNING);
-                    // Remove after a short delay
                     new Thread(() -> {
                         try { Thread.sleep(5000); } catch (InterruptedException ignored) {}
                         tray.remove(notifyIcon);
@@ -87,33 +195,27 @@ public class SystemMonitor {
         }
     }
 
-    public double getCpuUsage() {
-        return cpuUsage;
+    // ======================== Getters ========================
+
+    public double getCpuUsage() { return cpuUsage; }
+    public double getMemoryUsage() { return memoryUsage; }
+
+    public String getCpuUsageText() { return String.format("%.1f%%", cpuUsage); }
+    public String getMemoryUsageText() { return String.format("%.1f%%", memoryUsage); }
+
+    public String getDiskUsageText() {
+        if (diskReadKBps < 0 && diskWriteKBps < 0) return "N/A";
+        return String.format("R %.0f W %.0f KB/s", Math.max(0, diskReadKBps), Math.max(0, diskWriteKBps));
     }
 
-    public double getMemoryUsage() {
-        return memoryUsage;
+    public String getNetworkUsageText() {
+        if (netDownloadKBps <= 0 && netUploadKBps <= 0) return "N/A";
+        return String.format("\u2193%.0f \u2191%.0f KB/s", netDownloadKBps, netUploadKBps);
     }
 
-    public String getCpuUsageText() {
-        return String.format("%.1f%%", cpuUsage);
-    }
+    public LinkedList<Double> getCpuHistory() { return new LinkedList<>(cpuHistory); }
+    public LinkedList<Double> getMemHistory() { return new LinkedList<>(memHistory); }
 
-    public String getMemoryUsageText() {
-        return String.format("%.1f%%", memoryUsage);
-    }
-
-    public LinkedList<Double> getCpuHistory() {
-        return new LinkedList<>(cpuHistory);
-    }
-
-    public LinkedList<Double> getMemHistory() {
-        return new LinkedList<>(memHistory);
-    }
-
-    /**
-     * Get formatted memory info (used / total in MB)
-     */
     public String getMemoryDetailText() {
         long totalMem = osBean.getTotalMemorySize();
         long freeMem = osBean.getFreeMemorySize();

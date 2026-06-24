@@ -29,7 +29,6 @@ public class RunCatApp {
     private static FileChannel lockChannel;
 
     public static void main(String[] args) {
-        // Parse CLI args
         boolean silent = false;
         for (String arg : args) {
             if ("--silent".equals(arg) || "-s".equals(arg)) {
@@ -44,7 +43,6 @@ public class RunCatApp {
             }
         }
 
-        // Single instance lock
         if (!acquireInstanceLock()) {
             JOptionPane.showMessageDialog(null,
                     "Java RunCat is already running.",
@@ -52,14 +50,10 @@ public class RunCatApp {
             System.exit(0);
         }
 
-        // Set system look and feel
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-        } catch (Exception e) {
-            // fallback to default
-        }
+        } catch (Exception ignored) {}
 
-        // Check system tray support
         if (!SystemTray.isSupported()) {
             JOptionPane.showMessageDialog(null,
                     "System tray is not supported on this platform.",
@@ -67,29 +61,18 @@ public class RunCatApp {
             System.exit(1);
         }
 
-        // Load configuration
         appConfig = AppConfig.load();
-
-        // Initialize i18n
         I18nManager.getInstance().setLocale(appConfig.getLanguage());
-
-        // Initialize animation manager
         animationManager = new AnimationManager(appConfig);
-
-        // Initialize system monitor
         systemMonitor = new SystemMonitor();
 
-        // Initialize tray icon
         SwingUtilities.invokeLater(() -> {
             try {
                 trayIconManager = new TrayIconManager(appConfig, animationManager, systemMonitor);
                 trayIconManager.start();
-
-                // Start animation loop
                 startAnimationLoop();
-
-                // Start CPU monitor loop
                 startCpuMonitorLoop();
+                startThemeWatcher();
             } catch (AWTException e) {
                 JOptionPane.showMessageDialog(null,
                         "Failed to create tray icon: " + e.getMessage(),
@@ -98,19 +81,13 @@ public class RunCatApp {
             }
         });
 
-        // Shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             running = false;
-            if (trayIconManager != null) {
-                trayIconManager.stop();
-            }
+            if (trayIconManager != null) trayIconManager.stop();
             releaseInstanceLock();
         }));
     }
 
-    /**
-     * Acquire a file lock to ensure single instance
-     */
     private static boolean acquireInstanceLock() {
         try {
             String lockFile = System.getProperty("java.io.tmpdir") + "\\java-runcat.lock";
@@ -132,13 +109,21 @@ public class RunCatApp {
         } catch (IOException ignored) {}
     }
 
+    /**
+     * Animation loop - frame interval is driven by CPU usage (RunCat365 core feature).
+     * CPU 0%  → 300ms interval (slow walk)
+     * CPU 50% → 175ms interval (trot)
+     * CPU 100% → 50ms interval (sprint)
+     * Speed multiplier adjusts the base range.
+     */
     private static void startAnimationLoop() {
         Thread animationThread = new Thread(() -> {
             while (running) {
                 try {
                     double cpuUsage = systemMonitor.getCpuUsage();
                     double multiplier = config().getSpeedMultiplier();
-                    // Base interval: 50ms at 100% CPU, 300ms at 0% CPU
+
+                    // Map CPU 0-100% → interval 300-50ms, then divide by speed multiplier
                     int interval = (int) ((300 - (cpuUsage / 100.0) * 250) / multiplier);
                     interval = Math.max(30, Math.min(500, interval));
 
@@ -175,22 +160,67 @@ public class RunCatApp {
         monitorThread.start();
     }
 
-    public static AppConfig config() {
-        return appConfig;
+    /**
+     * Watch Windows theme changes and auto-switch icon theme.
+     * Uses registry polling (lightweight, ~5s interval) to detect dark/light mode.
+     */
+    private static void startThemeWatcher() {
+        if (!"auto".equals(appConfig.getIconTheme())) return;
+
+        Thread themeThread = new Thread(() -> {
+            boolean lastDark = isWindowsDarkMode();
+            while (running) {
+                try {
+                    Thread.sleep(5000);
+                    boolean isDark = isWindowsDarkMode();
+                    if (isDark != lastDark) {
+                        lastDark = isDark;
+                        // Theme changed - rebuild menu with new state
+                        SwingUtilities.invokeLater(() -> {
+                            if (trayIconManager != null) {
+                                trayIconManager.rebuildMenu();
+                            }
+                        });
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }, "ThemeWatcherThread");
+        themeThread.setDaemon(true);
+        themeThread.start();
     }
 
-    public static SystemMonitor getSystemMonitor() {
-        return systemMonitor;
+    /**
+     * Check if Windows is in dark mode by reading registry
+     */
+    private static boolean isWindowsDarkMode() {
+        try {
+            ProcessBuilder pb = new ProcessBuilder("reg", "query",
+                    "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                    "/v", "AppsUseLightTheme");
+            Process p = pb.start();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.contains("0x0")) return true;   // dark mode
+                if (line.contains("0x1")) return false;   // light mode
+            }
+        } catch (Exception ignored) {}
+        return true; // default to dark
     }
 
-    public static AnimationManager getAnimationManager() {
-        return animationManager;
+    public static boolean isSystemDarkMode() {
+        return isWindowsDarkMode();
     }
+
+    public static AppConfig config() { return appConfig; }
+    public static SystemMonitor getSystemMonitor() { return systemMonitor; }
+    public static AnimationManager getAnimationManager() { return animationManager; }
 
     public static void restart() {
-        if (trayIconManager != null) {
-            trayIconManager.stop();
-        }
+        if (trayIconManager != null) trayIconManager.stop();
         SwingUtilities.invokeLater(() -> {
             try {
                 I18nManager.getInstance().setLocale(appConfig.getLanguage());
@@ -203,7 +233,5 @@ public class RunCatApp {
         });
     }
 
-    public static boolean isRunning() {
-        return running;
-    }
+    public static boolean isRunning() { return running; }
 }

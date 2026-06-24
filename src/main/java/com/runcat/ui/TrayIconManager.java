@@ -10,14 +10,13 @@ import com.runcat.util.AutoStartManager;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Map;
 
 /**
- * System tray icon manager - the heart of the UI
- *
- * Uses JPopupMenu (Swing) instead of AWT PopupMenu to avoid
- * native encoding issues on Windows where native.encoding=GBK
- * causes CJK characters to display as garbled text in AWT menus.
+ * System tray icon manager
+ * Uses JPopupMenu (Swing) to avoid AWT native encoding issues on Windows.
  */
 public class TrayIconManager {
 
@@ -36,28 +35,26 @@ public class TrayIconManager {
         this.systemMonitor = systemMonitor;
         this.systemTray = SystemTray.getSystemTray();
 
-        // Create JPopupMenu (Swing - encoding safe)
         this.popupMenu = createPopupMenu();
-
-        // Create invisible JWindow as invoker for JPopupMenu
         this.invokerWindow = new JWindow();
         this.invokerWindow.setAlwaysOnTop(true);
 
-        // Create tray icon WITHOUT AWT PopupMenu
         Image initialImage = animationManager.getCurrentFrame();
-        if (initialImage == null) {
-            initialImage = createDefaultIcon();
-        }
+        if (initialImage == null) initialImage = createDefaultIcon();
         this.trayIcon = new TrayIcon(initialImage, "Java RunCat");
         this.trayIcon.setImageAutoSize(true);
         this.trayIcon.addMouseListener(new TrayIconMouseListener());
+    }
+
+    public void rebuildMenu() {
+        SwingUtilities.invokeLater(() -> popupMenu = createPopupMenu());
     }
 
     private JPopupMenu createPopupMenu() {
         I18nManager i18n = I18nManager.getInstance();
         JPopupMenu menu = new JPopupMenu();
 
-        // Dashboard item (top)
+        // Dashboard (top)
         JMenuItem dashboardItem = new JMenuItem(i18n.get("dashboard.title"));
         dashboardItem.addActionListener(e -> DashboardWindow.showOrFocus());
         menu.add(dashboardItem);
@@ -100,9 +97,8 @@ public class TrayIconManager {
         JCheckBoxMenuItem autoStartItem = new JCheckBoxMenuItem(
                 i18n.get("menu.settings.autoStart"), config.isAutoStart());
         autoStartItem.addItemListener(e -> {
-            boolean enabled = autoStartItem.isSelected();
-            config.setAutoStart(enabled);
-            AutoStartManager.setAutoStart(enabled);
+            config.setAutoStart(autoStartItem.isSelected());
+            AutoStartManager.setAutoStart(autoStartItem.isSelected());
         });
         settingsMenu.add(autoStartItem);
 
@@ -116,6 +112,11 @@ public class TrayIconManager {
         memItem.addItemListener(e -> config.setShowMemoryTooltip(memItem.isSelected()));
         settingsMenu.add(memItem);
 
+        JCheckBoxMenuItem timeItem = new JCheckBoxMenuItem(
+                i18n.get("menu.settings.showTime"), config.isShowTimeTooltip());
+        timeItem.addItemListener(e -> config.setShowTimeTooltip(timeItem.isSelected()));
+        settingsMenu.add(timeItem);
+
         settingsMenu.addSeparator();
 
         // CPU alert
@@ -126,22 +127,19 @@ public class TrayIconManager {
 
         settingsMenu.addSeparator();
 
-        // Icon theme
+        // Icon theme (auto / light / dark)
         JMenu themeMenu = new JMenu(i18n.get("menu.settings.iconTheme"));
-        JCheckBoxMenuItem lightItem = new JCheckBoxMenuItem(
-                i18n.get("menu.settings.iconTheme.light"), "light".equals(config.getIconTheme()));
-        lightItem.addItemListener(e -> {
-            config.setIconTheme("light");
-            RunCatApp.restart();
-        });
-        JCheckBoxMenuItem darkItem = new JCheckBoxMenuItem(
-                i18n.get("menu.settings.iconTheme.dark"), "dark".equals(config.getIconTheme()));
-        darkItem.addItemListener(e -> {
-            config.setIconTheme("dark");
-            RunCatApp.restart();
-        });
-        themeMenu.add(lightItem);
-        themeMenu.add(darkItem);
+        String[] themes = {"auto", "light", "dark"};
+        for (String theme : themes) {
+            JCheckBoxMenuItem themeItem = new JCheckBoxMenuItem(
+                    i18n.get("menu.settings.iconTheme." + theme),
+                    theme.equals(config.getIconTheme()));
+            themeItem.addItemListener(e -> {
+                config.setIconTheme(theme);
+                RunCatApp.restart();
+            });
+            themeMenu.add(themeItem);
+        }
         settingsMenu.add(themeMenu);
 
         menu.add(settingsMenu);
@@ -211,38 +209,25 @@ public class TrayIconManager {
     }
 
     private void updateSpeedMenu(JMenu speedMenu) {
+        double speed = config.getSpeedMultiplier();
         for (int i = 0; i < speedMenu.getItemCount(); i++) {
             JMenuItem item = speedMenu.getItem(i);
-            if (item instanceof JCheckBoxMenuItem) {
-                ((JCheckBoxMenuItem) item).setSelected(false);
+            if (item instanceof JCheckBoxMenuItem cb) {
+                cb.setSelected(false);
             }
         }
-        double speed = config.getSpeedMultiplier();
         int idx = speed == 0.5 ? 0 : speed == 2.0 ? 2 : 1;
         if (idx < speedMenu.getItemCount() && speedMenu.getItem(idx) instanceof JCheckBoxMenuItem cb) {
             cb.setSelected(true);
         }
     }
 
-    private void rebuildMenu() {
-        SwingUtilities.invokeLater(() -> {
-            popupMenu = createPopupMenu();
-        });
-    }
-
-    /**
-     * Show JPopupMenu at the mouse cursor position.
-     * Uses a persistent invisible JWindow as the invoker.
-     * Positions the popup above the taskbar (since tray icons are at the bottom).
-     */
     private void showPopupMenu() {
         SwingUtilities.invokeLater(() -> {
             Point mouseLoc = MouseInfo.getPointerInfo().getLocation();
-            // Position the invisible invoker window at the mouse location
             invokerWindow.setLocation(mouseLoc.x, mouseLoc.y);
             invokerWindow.setVisible(true);
 
-            // Calculate popup position: above the taskbar, right-aligned
             Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
             Insets screenInsets = Toolkit.getDefaultToolkit().getScreenInsets(
                     GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice().getDefaultConfiguration());
@@ -251,21 +236,16 @@ public class TrayIconManager {
             int x = mouseLoc.x;
             int y = screenSize.height - taskbarHeight;
 
-            // Show popup at calculated position relative to invoker
             int offsetX = x - mouseLoc.x;
             int offsetY = y - mouseLoc.y;
             popupMenu.show(invokerWindow, offsetX, offsetY);
-
-            // Bring to front
             popupMenu.requestFocus();
         });
     }
 
     public void updateIcon() {
         Image frame = animationManager.getNextFrame();
-        if (frame != null) {
-            trayIcon.setImage(frame);
-        }
+        if (frame != null) trayIcon.setImage(frame);
         updateTooltip();
     }
 
@@ -279,6 +259,10 @@ public class TrayIconManager {
             if (sb.length() > 0) sb.append(" | ");
             sb.append(i18n.get("tooltip.memory", systemMonitor.getMemoryUsageText()));
         }
+        if (config.isShowTimeTooltip()) {
+            if (sb.length() > 0) sb.append(" | ");
+            sb.append(LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm")));
+        }
         trayIcon.setToolTip(sb.length() > 0 ? sb.toString() : "Java RunCat");
     }
 
@@ -289,15 +273,13 @@ public class TrayIconManager {
 
     public void stop() {
         systemTray.remove(trayIcon);
-        if (invokerWindow != null) {
-            invokerWindow.dispose();
-        }
+        if (invokerWindow != null) invokerWindow.dispose();
     }
 
     private Image createDefaultIcon() {
         java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(16, 16, java.awt.image.BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = img.createGraphics();
-        g.setColor(Color.ORANGE);
+        g.setColor(new Color(60, 60, 70));
         g.fillOval(2, 2, 12, 12);
         g.dispose();
         return img;
@@ -314,9 +296,7 @@ public class TrayIconManager {
     private void showCustomAnimationDialog() {
         CustomAnimationDialog dialog = new CustomAnimationDialog(animationManager);
         dialog.setVisible(true);
-        if (dialog.isApplied()) {
-            rebuildMenu();
-        }
+        if (dialog.isApplied()) rebuildMenu();
     }
 
     private class TrayIconMouseListener extends MouseAdapter {
@@ -329,16 +309,12 @@ public class TrayIconManager {
 
         @Override
         public void mouseReleased(MouseEvent e) {
-            if (SwingUtilities.isRightMouseButton(e) || e.isPopupTrigger()) {
-                showPopupMenu();
-            }
+            if (SwingUtilities.isRightMouseButton(e) || e.isPopupTrigger()) showPopupMenu();
         }
 
         @Override
         public void mousePressed(MouseEvent e) {
-            if (SwingUtilities.isRightMouseButton(e) || e.isPopupTrigger()) {
-                showPopupMenu();
-            }
+            if (SwingUtilities.isRightMouseButton(e) || e.isPopupTrigger()) showPopupMenu();
         }
     }
 }

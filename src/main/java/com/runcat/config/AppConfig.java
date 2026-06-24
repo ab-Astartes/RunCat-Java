@@ -32,8 +32,11 @@ public class AppConfig {
     // Animation speed multiplier (1.0 = normal)
     private double speedMultiplier = 1.0;
 
-    // Theme: "light" or "dark" for tray icon
-    private String iconTheme = "dark";
+    // Theme: "auto", "light" or "dark" for tray icon
+    private String iconTheme = "auto";
+
+    // Show time in tooltip
+    private boolean showTimeTooltip = false;
 
     // CPU alert settings
     private boolean cpuAlertEnabled = true;
@@ -106,6 +109,9 @@ public class AppConfig {
 
     public long getCpuAlertCooldown() { return cpuAlertCooldown; }
     public void setCpuAlertCooldown(long cpuAlertCooldown) { this.cpuAlertCooldown = cpuAlertCooldown; save(); }
+
+    public boolean isShowTimeTooltip() { return showTimeTooltip; }
+    public void setShowTimeTooltip(boolean showTimeTooltip) { this.showTimeTooltip = showTimeTooltip; save(); }
 
     public int getDashboardX() { return dashboardX; }
     public void setDashboardX(int dashboardX) { this.dashboardX = dashboardX; }
