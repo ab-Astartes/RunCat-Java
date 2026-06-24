@@ -38,7 +38,7 @@ public class AnimationManager {
     }
 
     private void loadBuiltInAnimations() {
-        String[] names = {"cat", "cat_sleep", "dog", "horse", "parrot"};
+        String[] names = {"cat", "cat_sleep", "dog", "horse", "parrot", "rabbit", "penguin"};
         for (String name : names) {
             List<Image> frames = loadResourceAnimation(name);
             if (!frames.isEmpty()) {
@@ -78,10 +78,12 @@ public class AnimationManager {
     private List<Image> generatePlaceholderFrames(String name) {
         List<Image> frames = new ArrayList<>();
         Color color = switch (name) {
-            case "cat", "cat_sleep" -> new Color(60, 60, 70);
-            case "dog" -> new Color(180, 130, 70);
-            case "horse" -> new Color(160, 110, 60);
-            case "parrot" -> new Color(0, 160, 60);
+            case "cat", "cat_sleep" -> new Color(255, 140, 40);
+            case "dog" -> new Color(200, 150, 80);
+            case "horse" -> new Color(170, 120, 70);
+            case "parrot" -> new Color(30, 180, 90);
+            case "rabbit" -> new Color(240, 240, 245);
+            case "penguin" -> new Color(30, 35, 40);
             default -> Color.GRAY;
         };
 
@@ -249,6 +251,8 @@ public class AnimationManager {
             case "dog" -> "\uD83D\uDC15 Dog";
             case "horse" -> "\uD83D\uDC0E Horse";
             case "parrot" -> "\uD83E\uDD9C Parrot";
+            case "rabbit" -> "\uD83D\uDC30 Rabbit";
+            case "penguin" -> "\uD83D\uDC27 Penguin";
             default -> "\uD83D\uDCE6 " + name;
         };
     }
