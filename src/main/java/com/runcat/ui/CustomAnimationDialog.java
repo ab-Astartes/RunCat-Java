@@ -95,14 +95,13 @@ public class CustomAnimationDialog extends JDialog {
             File[] pngFiles = dir.listFiles((d, name) -> name.toLowerCase().endsWith(".png"));
             if (pngFiles != null && pngFiles.length > 0) {
                 statusLabel.setText(i18n.get("custom.frames") + ": " + pngFiles.length);
-                previewLabel.setText("<html><center>Selected: " + dir.getName() +
-                        "<br/>Frames: " + pngFiles.length + "<br/><i>Click Apply to import</i></center></html>");
+                previewLabel.setText(String.format(i18n.get("custom.selected"), dir.getName(), pngFiles.length));
                 if (nameField.getText().isEmpty()) {
                     nameField.setText(dir.getName());
                 }
                 applyButton.setEnabled(true);
             } else {
-                statusLabel.setText("No PNG files found in the selected directory!");
+                statusLabel.setText(i18n.get("custom.noPngFound"));
                 applyButton.setEnabled(false);
             }
         }
@@ -111,27 +110,27 @@ public class CustomAnimationDialog extends JDialog {
     private void applyAnimation() {
         String name = nameField.getText().trim();
         if (name.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Please enter an animation name.",
-                    "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, i18n.get("custom.enterName"),
+                    i18n.get("app.title"), JOptionPane.ERROR_MESSAGE);
             return;
         }
         if (selectedDir == null) {
-            JOptionPane.showMessageDialog(this, "Please select a directory first.",
-                    "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, i18n.get("custom.selectDirFirst"),
+                    i18n.get("app.title"), JOptionPane.ERROR_MESSAGE);
             return;
         }
 
         boolean success = animationManager.importCustomAnimation(name, selectedDir);
         if (success) {
             JOptionPane.showMessageDialog(this,
-                    "Animation '" + name + "' imported successfully!",
-                    "Success", JOptionPane.INFORMATION_MESSAGE);
+                    String.format(i18n.get("custom.importSuccess"), name),
+                    i18n.get("app.title"), JOptionPane.INFORMATION_MESSAGE);
             applied = true;
             dispose();
         } else {
             JOptionPane.showMessageDialog(this,
-                    "Failed to import animation. Make sure the directory contains PNG files.",
-                    "Error", JOptionPane.ERROR_MESSAGE);
+                    i18n.get("custom.importFailed"),
+                    i18n.get("app.title"), JOptionPane.ERROR_MESSAGE);
         }
     }
 

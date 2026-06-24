@@ -204,13 +204,15 @@ public class SystemMonitor {
     public String getMemoryUsageText() { return String.format("%.1f%%", memoryUsage); }
 
     public String getDiskUsageText() {
-        if (diskReadKBps < 0 && diskWriteKBps < 0) return "N/A";
-        return String.format("R %.0f W %.0f KB/s", Math.max(0, diskReadKBps), Math.max(0, diskWriteKBps));
+        I18nManager i18n = I18nManager.getInstance();
+        if (diskReadKBps < 0 && diskWriteKBps < 0) return i18n.get("monitor.notAvailable");
+        return String.format(i18n.get("monitor.diskFormat"), Math.max(0, diskReadKBps), Math.max(0, diskWriteKBps));
     }
 
     public String getNetworkUsageText() {
-        if (netDownloadKBps <= 0 && netUploadKBps <= 0) return "N/A";
-        return String.format("\u2193%.0f \u2191%.0f KB/s", netDownloadKBps, netUploadKBps);
+        I18nManager i18n = I18nManager.getInstance();
+        if (netDownloadKBps <= 0 && netUploadKBps <= 0) return i18n.get("monitor.notAvailable");
+        return String.format(i18n.get("monitor.netFormat"), netDownloadKBps, netUploadKBps);
     }
 
     public LinkedList<Double> getCpuHistory() { return new LinkedList<>(cpuHistory); }

@@ -1,6 +1,7 @@
 package com.runcat.animation;
 
 import com.runcat.config.AppConfig;
+import com.runcat.i18n.I18nManager;
 
 import javax.imageio.ImageIO;
 import java.awt.*;
@@ -245,15 +246,13 @@ public class AnimationManager {
     }
 
     public String getAnimationDisplayName(String name) {
-        return switch (name) {
-            case "cat" -> "\uD83D\uDC31 Cat";
-            case "cat_sleep" -> "\uD83D\uDE34 Sleepy Cat";
-            case "dog" -> "\uD83D\uDC15 Dog";
-            case "horse" -> "\uD83D\uDC0E Horse";
-            case "parrot" -> "\uD83E\uDD9C Parrot";
-            case "rabbit" -> "\uD83D\uDC30 Rabbit";
-            case "penguin" -> "\uD83D\uDC27 Penguin";
-            default -> "\uD83D\uDCE6 " + name;
-        };
+        I18nManager i18n = I18nManager.getInstance();
+        String key = "anim." + name;
+        String value = i18n.get(key);
+        // If the key was not found (returns the key itself), fall back to raw name
+        if (value.equals(key)) {
+            return "\uD83D\uDCE6 " + name;
+        }
+        return value;
     }
 }

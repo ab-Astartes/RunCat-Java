@@ -263,7 +263,7 @@ public class TrayIconManager {
             if (sb.length() > 0) sb.append(" | ");
             sb.append(LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm")));
         }
-        trayIcon.setToolTip(sb.length() > 0 ? sb.toString() : "Java RunCat");
+        trayIcon.setToolTip(sb.length() > 0 ? sb.toString() : i18n.get("app.title"));
     }
 
     public void start() throws AWTException {

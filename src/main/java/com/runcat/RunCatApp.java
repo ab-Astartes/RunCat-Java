@@ -44,8 +44,9 @@ public class RunCatApp {
         }
 
         if (!acquireInstanceLock()) {
+            I18nManager i18n = I18nManager.getInstance();
             JOptionPane.showMessageDialog(null,
-                    "Java RunCat is already running.",
+                    i18n.get("app.alreadyRunning"),
                     "Java RunCat", JOptionPane.WARNING_MESSAGE);
             System.exit(0);
         }
@@ -55,8 +56,9 @@ public class RunCatApp {
         } catch (Exception ignored) {}
 
         if (!SystemTray.isSupported()) {
+            I18nManager i18n = I18nManager.getInstance();
             JOptionPane.showMessageDialog(null,
-                    "System tray is not supported on this platform.",
+                    i18n.get("app.trayNotSupported"),
                     "Java RunCat", JOptionPane.ERROR_MESSAGE);
             System.exit(1);
         }
@@ -74,8 +76,9 @@ public class RunCatApp {
                 startCpuMonitorLoop();
                 startThemeWatcher();
             } catch (AWTException e) {
+                I18nManager i18n = I18nManager.getInstance();
                 JOptionPane.showMessageDialog(null,
-                        "Failed to create tray icon: " + e.getMessage(),
+                        String.format(i18n.get("app.trayCreateFailed"), e.getMessage()),
                         "Java RunCat", JOptionPane.ERROR_MESSAGE);
                 System.exit(1);
             }
