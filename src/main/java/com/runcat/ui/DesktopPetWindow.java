@@ -1,7 +1,9 @@
 package com.runcat.ui;
 
 import com.runcat.RunCatApp;
+import com.runcat.animation.AnimationPlayback;
 import com.runcat.animation.AnimationManager;
+import com.runcat.animation.PetAnimationState;
 import com.runcat.config.AppConfig;
 import com.runcat.core.SystemMonitor;
 import com.runcat.i18n.I18nManager;
@@ -10,6 +12,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.geom.Ellipse2D;
+import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.util.LinkedList;
 
@@ -32,15 +35,21 @@ public class DesktopPetWindow extends JWindow {
     private final AppConfig config;
     private final AnimationManager animManager;
     private final SystemMonitor systemMonitor;
+    private final AnimationPlayback petPlayback;
 
     private JLabel petLabel;
     private JPanel contentPanel;
     private Timer animTimer;
     private Point dragStart;
     private boolean dragging = false;
+    private boolean dragArmed = false;
+    private Point dragOffset;
+    private AWTEventListener globalMouseListener;
 
     private int currentSize;
     private ImageIcon currentFrameIcon;
+    private PetAnimationState petState = PetAnimationState.IDLE;
+    private Timer stateResetTimer;
 
     public static void showOrFocus() {
         if (instance != null && instance.isVisible()) {
@@ -73,6 +82,7 @@ public class DesktopPetWindow extends JWindow {
         this.config = RunCatApp.config();
         this.animManager = RunCatApp.getAnimationManager();
         this.systemMonitor = RunCatApp.getSystemMonitor();
+        this.petPlayback = animManager.createPetPlayback();
         this.currentSize = config.getDesktopPetSize();
 
         initUI();
@@ -80,7 +90,6 @@ public class DesktopPetWindow extends JWindow {
     }
 
     private void initUI() {
-        // Transparent background
         setBackground(new Color(0, 0, 0, 0));
 
         contentPanel = new JPanel(new BorderLayout());
@@ -103,11 +112,14 @@ public class DesktopPetWindow extends JWindow {
                 int shadowSize = currentSize + 16;
                 int cx = getWidth() / 2;
                 int cy = getHeight() / 2 + 8;
+                Color baseShadow = petState == PetAnimationState.ALERT
+                        ? new Color(220, 85, 55, 30)
+                        : new Color(0, 0, 0, 24);
                 // Elliptical shadow
                 for (int i = 3; i >= 0; i--) {
-                    int alpha = 15 + i * 8;
+                    int alpha = Math.min(90, baseShadow.getAlpha() + i * 10);
                     int expand = i * 4;
-                    g2d.setColor(new Color(0, 0, 0, alpha));
+                    g2d.setColor(new Color(baseShadow.getRed(), baseShadow.getGreen(), baseShadow.getBlue(), alpha));
                     g2d.fill(new Ellipse2D.Double(
                             cx - shadowSize / 2.0 - expand,
                             cy - shadowSize / 6.0 - expand / 2.0,
@@ -129,29 +141,19 @@ public class DesktopPetWindow extends JWindow {
         MouseAdapter mouseAdapter = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
-                if (e.getButton() == MouseEvent.BUTTON1) {
-                    dragStart = SwingUtilities.convertPoint(DesktopPetWindow.this, e.getPoint(), contentPanel);
-                    dragging = false;
+                if (SwingUtilities.isLeftMouseButton(e)) {
+                    armDrag(e);
                 }
             }
 
             @Override
             public void mouseDragged(MouseEvent e) {
-                if (dragStart != null) {
-                    Point current = e.getLocationOnScreen();
-                    setLocation(current.x - dragStart.x, current.y - dragStart.y);
-                    dragging = true;
-                }
+                moveWindowWithMouse(e.getLocationOnScreen());
             }
 
             @Override
             public void mouseReleased(MouseEvent e) {
-                if (e.getButton() == MouseEvent.BUTTON1 && !dragging) {
-                    // Single click - show tooltip or bounce effect
-                    bouncePet();
-                }
-                dragStart = null;
-                dragging = false;
+                finishPointerInteraction(e);
             }
 
             @Override
@@ -165,11 +167,19 @@ public class DesktopPetWindow extends JWindow {
 
         contentPanel.addMouseListener(mouseAdapter);
         contentPanel.addMouseMotionListener(mouseAdapter);
+        shadowPanel.addMouseListener(mouseAdapter);
+        shadowPanel.addMouseMotionListener(mouseAdapter);
+        petLabel.addMouseListener(mouseAdapter);
+        petLabel.addMouseMotionListener(mouseAdapter);
 
         // Right-click menu
-        contentPanel.setComponentPopupMenu(createPopupMenu());
+        JPopupMenu popupMenu = createPopupMenu();
+        contentPanel.setComponentPopupMenu(popupMenu);
+        shadowPanel.setComponentPopupMenu(popupMenu);
+        petLabel.setComponentPopupMenu(popupMenu);
 
         add(contentPanel);
+        installGlobalMouseTracking();
 
         // Position
         if (config.getDesktopPetX() >= 0 && config.getDesktopPetY() >= 0) {
@@ -248,7 +258,9 @@ public class DesktopPetWindow extends JWindow {
         // Calculate initial interval based on CPU
         int interval = 150; // ms between frames for desktop pet (faster = smoother)
         animTimer = new Timer(interval, e -> {
+            updatePetStateFromLoad();
             updateFrame();
+            updateTimerDelay();
             // Update tooltip every few frames
             petLabel.setToolTipText(buildTooltip());
         });
@@ -263,11 +275,8 @@ public class DesktopPetWindow extends JWindow {
     }
 
     private void updateFrame() {
-        Image frame = animManager.getNextHiResFrame();
-        if (frame == null) {
-            frame = animManager.getNextFrame();
-            if (frame == null) return;
-        }
+        Image frame = petPlayback.nextFrame();
+        if (frame == null) return;
 
         // Scale to desktop pet size
         BufferedImage scaled = new BufferedImage(currentSize, currentSize, BufferedImage.TYPE_INT_ARGB);
@@ -278,8 +287,44 @@ public class DesktopPetWindow extends JWindow {
         g2d.drawImage(frame, 0, 0, currentSize, currentSize, null);
         g2d.dispose();
 
-        currentFrameIcon = new ImageIcon(scaled);
+        currentFrameIcon = new ImageIcon(polishPetFrame(scaled));
         petLabel.setIcon(currentFrameIcon);
+    }
+
+    private BufferedImage polishPetFrame(BufferedImage source) {
+        BufferedImage polished = new BufferedImage(source.getWidth(), source.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = polished.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+
+        // Subtle outline to separate the pet from bright desktop backgrounds.
+        g.drawImage(tintAlphaMask(source, new Color(28, 30, 36, 34)), -1, 0, null);
+        g.drawImage(tintAlphaMask(source, new Color(28, 30, 36, 34)), 1, 0, null);
+        g.drawImage(tintAlphaMask(source, new Color(28, 30, 36, 34)), 0, -1, null);
+        g.drawImage(tintAlphaMask(source, new Color(28, 30, 36, 34)), 0, 1, null);
+
+        g.drawImage(source, 0, 0, null);
+
+        // Soft top-left rim light so the pet feels less flat.
+        g.setComposite(AlphaComposite.SrcOver.derive(0.14f));
+        g.setPaint(new GradientPaint(
+                0, 0, new Color(255, 255, 255, 180),
+                source.getWidth(), source.getHeight(), new Color(255, 255, 255, 0)));
+        g.fillOval(source.getWidth() / 7, source.getHeight() / 10, source.getWidth() * 2 / 3, source.getHeight() / 2);
+
+        g.dispose();
+        return polished;
+    }
+
+    private BufferedImage tintAlphaMask(BufferedImage source, Color color) {
+        BufferedImage mask = new BufferedImage(source.getWidth(), source.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = mask.createGraphics();
+        g.drawImage(source, 0, 0, null);
+        g.setComposite(AlphaComposite.SrcIn);
+        g.setColor(color);
+        g.fillRect(0, 0, source.getWidth(), source.getHeight());
+        g.dispose();
+        return mask;
     }
 
     private void refreshAppearance() {
@@ -297,6 +342,7 @@ public class DesktopPetWindow extends JWindow {
         setOpacity(opacity);
 
         // Force first frame render
+        petPlayback.reset();
         updateFrame();
 
         revalidate();
@@ -318,27 +364,147 @@ public class DesktopPetWindow extends JWindow {
     private void bouncePet() {
         Timer bounceTimer = new Timer(30, null);
         final int[] step = {0};
-        final int totalSteps = 10;
+        final int totalSteps = 14;
         final int baseY = getY();
 
         bounceTimer.addActionListener(e -> {
             step[0]++;
             double t = (double) step[0] / totalSteps;
-            // Parabolic bounce: go up then back down
-            int offset = (int) (-12 * Math.sin(t * Math.PI));
+            int offset = easeOutBounceOffset(t);
             setLocation(getX(), baseY + offset);
 
             if (step[0] >= totalSteps) {
                 setLocation(getX(), baseY);
+                updatePetStateFromLoad();
                 bounceTimer.stop();
             }
         });
         bounceTimer.start();
     }
 
+    private int easeOutBounceOffset(double t) {
+        double eased = Math.sin(Math.PI * t);
+        return (int) Math.round(-16 * eased * (0.75 + (1 - t) * 0.25));
+    }
+
+    private void handlePrimaryClick() {
+        String clickAction = config.getDesktopPetClickAction();
+        if ("dashboard".equals(clickAction)) {
+            DashboardWindow.showOrFocus();
+            return;
+        }
+        setPetState(PetAnimationState.JUMP);
+        bouncePet();
+    }
+
+    private void updateTimerDelay() {
+        if (animTimer == null) return;
+        double cpuUsage = Math.max(0, systemMonitor.getCpuUsage());
+        double multiplier = config.getSpeedMultiplier();
+        int targetDelay = (int) ((220 - (cpuUsage / 100.0) * 120) / multiplier);
+        targetDelay = Math.max(45, Math.min(220, targetDelay));
+        if (config.isAnimationSmoothingEnabled()) {
+            targetDelay = (int) Math.round((animTimer.getDelay() * 0.65) + (targetDelay * 0.35));
+        }
+        animTimer.setDelay(targetDelay);
+    }
+
+    private void updatePetStateFromLoad() {
+        if (dragging) {
+            setPetState(PetAnimationState.DRAG);
+            return;
+        }
+        if (systemMonitor.getCpuUsage() >= Math.max(90, config.getCpuAlertThreshold())) {
+            setPetState(PetAnimationState.ALERT);
+            return;
+        }
+        setPetState(systemMonitor.getCpuUsage() >= 25 ? PetAnimationState.RUN : PetAnimationState.IDLE);
+    }
+
+    private void setPetState(PetAnimationState state) {
+        if (state == null) return;
+        petState = state;
+        petPlayback.setState(state);
+        if (state == PetAnimationState.JUMP || state == PetAnimationState.ALERT) {
+            scheduleStateReset();
+        }
+        repaint();
+    }
+
+    private void scheduleStateReset() {
+        if (stateResetTimer != null) {
+            stateResetTimer.stop();
+        }
+        stateResetTimer = new Timer(900, e -> {
+            updatePetStateFromLoad();
+            stateResetTimer.stop();
+        });
+        stateResetTimer.setRepeats(false);
+        stateResetTimer.start();
+    }
+
+    static Shape createHitShape(int width, int height) {
+        return new RoundRectangle2D.Double(0, 0, Math.max(1, width), Math.max(1, height), 26, 26);
+    }
+
+    private void armDrag(MouseEvent e) {
+        dragStart = e.getLocationOnScreen();
+        dragOffset = new Point(dragStart.x - getX(), dragStart.y - getY());
+        dragArmed = true;
+        dragging = false;
+    }
+
+    private void moveWindowWithMouse(Point pointOnScreen) {
+        if (!dragArmed || dragOffset == null || pointOnScreen == null) {
+            return;
+        }
+        setPetState(PetAnimationState.DRAG);
+        setLocation(pointOnScreen.x - dragOffset.x, pointOnScreen.y - dragOffset.y);
+        dragging = true;
+    }
+
+    private void finishPointerInteraction(MouseEvent e) {
+        if (!dragArmed) {
+            return;
+        }
+        boolean shouldTriggerClick = SwingUtilities.isLeftMouseButton(e) && !dragging && e.getClickCount() <= 1;
+        dragArmed = false;
+        dragStart = null;
+        dragOffset = null;
+        if (dragging) {
+            updatePetStateFromLoad();
+        }
+        dragging = false;
+        if (shouldTriggerClick) {
+            handlePrimaryClick();
+        }
+    }
+
+    private void installGlobalMouseTracking() {
+        globalMouseListener = event -> {
+            if (!(event instanceof MouseEvent mouseEvent) || !dragArmed) {
+                return;
+            }
+            if (mouseEvent.getID() == MouseEvent.MOUSE_DRAGGED) {
+                moveWindowWithMouse(mouseEvent.getLocationOnScreen());
+            } else if (mouseEvent.getID() == MouseEvent.MOUSE_RELEASED) {
+                finishPointerInteraction(mouseEvent);
+            }
+        };
+        Toolkit.getDefaultToolkit().addAWTEventListener(
+                globalMouseListener,
+                AWTEvent.MOUSE_MOTION_EVENT_MASK | AWTEvent.MOUSE_EVENT_MASK);
+    }
+
     @Override
     public void dispose() {
         stopAnimation();
+        if (stateResetTimer != null) {
+            stateResetTimer.stop();
+        }
+        if (globalMouseListener != null) {
+            Toolkit.getDefaultToolkit().removeAWTEventListener(globalMouseListener);
+        }
         config.saveDesktopPetPosition(getX(), getY());
         instance = null;
         super.dispose();

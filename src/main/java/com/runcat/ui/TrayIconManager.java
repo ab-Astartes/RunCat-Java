@@ -1,6 +1,7 @@
 package com.runcat.ui;
 
 import com.runcat.RunCatApp;
+import com.runcat.animation.AnimationPlayback;
 import com.runcat.animation.AnimationManager;
 import com.runcat.config.AppConfig;
 import com.runcat.core.SystemMonitor;
@@ -25,6 +26,7 @@ public class TrayIconManager {
     private final AppConfig config;
     private final AnimationManager animationManager;
     private final SystemMonitor systemMonitor;
+    private final AnimationPlayback trayPlayback;
     private JPopupMenu popupMenu;
     private JWindow invokerWindow;
 
@@ -34,12 +36,13 @@ public class TrayIconManager {
         this.animationManager = animationManager;
         this.systemMonitor = systemMonitor;
         this.systemTray = SystemTray.getSystemTray();
+        this.trayPlayback = animationManager.createTrayPlayback();
 
         this.popupMenu = createPopupMenu();
         this.invokerWindow = new JWindow();
         this.invokerWindow.setAlwaysOnTop(true);
 
-        Image initialImage = animationManager.getCurrentFrame();
+        Image initialImage = trayPlayback.peekFrame();
         if (initialImage == null) initialImage = createDefaultIcon();
         this.trayIcon = new TrayIcon(initialImage, "Java RunCat");
         this.trayIcon.setImageAutoSize(true);
@@ -132,6 +135,23 @@ public class TrayIconManager {
 
         settingsMenu.addSeparator();
 
+        JMenu topProcessMenu = new JMenu(i18n.get("menu.settings.topProcesses"));
+        addTopProcessItems(topProcessMenu);
+        settingsMenu.add(topProcessMenu);
+
+        JMenu refreshMenu = new JMenu(i18n.get("menu.settings.dashboardRefresh"));
+        addRefreshItems(refreshMenu);
+        settingsMenu.add(refreshMenu);
+
+        JCheckBoxMenuItem smoothingItem = new JCheckBoxMenuItem(
+                i18n.get("menu.settings.animationSmoothing"), config.isAnimationSmoothingEnabled());
+        smoothingItem.addItemListener(e -> config.setAnimationSmoothingEnabled(smoothingItem.isSelected()));
+        settingsMenu.add(smoothingItem);
+
+        JMenu petClickMenu = new JMenu(i18n.get("menu.settings.petClickAction"));
+        addPetClickItems(petClickMenu);
+        settingsMenu.add(petClickMenu);
+
         // CPU alert
         JCheckBoxMenuItem cpuAlertItem = new JCheckBoxMenuItem(
                 i18n.get("menu.settings.cpuAlert"), config.isCpuAlertEnabled());
@@ -140,17 +160,27 @@ public class TrayIconManager {
 
         settingsMenu.addSeparator();
 
+        JMenuItem manageCustomAnimItem = new JMenuItem(i18n.get("menu.settings.customManager"));
+        manageCustomAnimItem.addActionListener(e -> showCustomAnimationDialog());
+        settingsMenu.add(manageCustomAnimItem);
+
+        settingsMenu.addSeparator();
+
         // Icon theme (auto / light / dark)
         JMenu themeMenu = new JMenu(i18n.get("menu.settings.iconTheme"));
         String[] themes = {"auto", "light", "dark"};
+        ButtonGroup themeGroup = new ButtonGroup();
         for (String theme : themes) {
-            JCheckBoxMenuItem themeItem = new JCheckBoxMenuItem(
+            JRadioButtonMenuItem themeItem = new JRadioButtonMenuItem(
                     i18n.get("menu.settings.iconTheme." + theme),
                     theme.equals(config.getIconTheme()));
             themeItem.addItemListener(e -> {
-                config.setIconTheme(theme);
-                RunCatApp.restart();
+                if (themeItem.isSelected()) {
+                    config.setIconTheme(theme);
+                    RunCatApp.restart();
+                }
             });
+            themeGroup.add(themeItem);
             themeMenu.add(themeItem);
         }
         settingsMenu.add(themeMenu);
@@ -177,15 +207,21 @@ public class TrayIconManager {
     }
 
     private void addAnimationItems(JMenu animationMenu) {
+        ButtonGroup group = new ButtonGroup();
         for (Map.Entry<String, java.util.List<Image>> entry :
                 animationManager.getBuiltInAnimations().entrySet()) {
-            JCheckBoxMenuItem item = new JCheckBoxMenuItem(
+            JRadioButtonMenuItem item = new JRadioButtonMenuItem(
                     animationManager.getAnimationDisplayName(entry.getKey()),
                     entry.getKey().equals(config.getCurrentAnimation()));
             item.addItemListener(e -> {
-                animationManager.setCurrentAnimation(entry.getKey());
-                rebuildMenu();
+                if (item.isSelected()) {
+                    animationManager.setCurrentAnimation(entry.getKey());
+                    trayPlayback.reset();
+                    rebuildMenu();
+                    DesktopPetWindow.refreshIfShowing();
+                }
             });
+            group.add(item);
             animationMenu.add(item);
         }
 
@@ -193,13 +229,18 @@ public class TrayIconManager {
         if (!customAnims.isEmpty()) {
             animationMenu.addSeparator();
             for (Map.Entry<String, java.util.List<Image>> entry : customAnims.entrySet()) {
-                JCheckBoxMenuItem item = new JCheckBoxMenuItem(
+                JRadioButtonMenuItem item = new JRadioButtonMenuItem(
                         animationManager.getAnimationDisplayName(entry.getKey()),
                         entry.getKey().equals(config.getCurrentAnimation()));
                 item.addItemListener(e -> {
-                    animationManager.setCurrentAnimation(entry.getKey());
-                    rebuildMenu();
+                    if (item.isSelected()) {
+                        animationManager.setCurrentAnimation(entry.getKey());
+                        trayPlayback.reset();
+                        rebuildMenu();
+                        DesktopPetWindow.refreshIfShowing();
+                    }
                 });
+                group.add(item);
                 animationMenu.add(item);
             }
         }
@@ -208,30 +249,69 @@ public class TrayIconManager {
     private void addSpeedItems(JMenu speedMenu) {
         I18nManager i18n = I18nManager.getInstance();
         double speed = config.getSpeedMultiplier();
+        ButtonGroup group = new ButtonGroup();
 
-        JCheckBoxMenuItem slowItem = new JCheckBoxMenuItem(i18n.get("menu.speed.slow"), speed == 0.5);
-        slowItem.addItemListener(e -> { config.setSpeedMultiplier(0.5); updateSpeedMenu(speedMenu); });
-        JCheckBoxMenuItem normalItem = new JCheckBoxMenuItem(i18n.get("menu.speed.normal"), speed == 1.0);
-        normalItem.addItemListener(e -> { config.setSpeedMultiplier(1.0); updateSpeedMenu(speedMenu); });
-        JCheckBoxMenuItem fastItem = new JCheckBoxMenuItem(i18n.get("menu.speed.fast"), speed == 2.0);
-        fastItem.addItemListener(e -> { config.setSpeedMultiplier(2.0); updateSpeedMenu(speedMenu); });
+        JRadioButtonMenuItem slowItem = new JRadioButtonMenuItem(i18n.get("menu.speed.slow"), speed == 0.5);
+        slowItem.addItemListener(e -> { if (slowItem.isSelected()) config.setSpeedMultiplier(0.5); });
+        JRadioButtonMenuItem normalItem = new JRadioButtonMenuItem(i18n.get("menu.speed.normal"), speed == 1.0);
+        normalItem.addItemListener(e -> { if (normalItem.isSelected()) config.setSpeedMultiplier(1.0); });
+        JRadioButtonMenuItem fastItem = new JRadioButtonMenuItem(i18n.get("menu.speed.fast"), speed == 2.0);
+        fastItem.addItemListener(e -> { if (fastItem.isSelected()) config.setSpeedMultiplier(2.0); });
 
+        group.add(slowItem);
+        group.add(normalItem);
+        group.add(fastItem);
         speedMenu.add(slowItem);
         speedMenu.add(normalItem);
         speedMenu.add(fastItem);
     }
 
-    private void updateSpeedMenu(JMenu speedMenu) {
-        double speed = config.getSpeedMultiplier();
-        for (int i = 0; i < speedMenu.getItemCount(); i++) {
-            JMenuItem item = speedMenu.getItem(i);
-            if (item instanceof JCheckBoxMenuItem cb) {
-                cb.setSelected(false);
-            }
+    private void addTopProcessItems(JMenu topProcessMenu) {
+        ButtonGroup group = new ButtonGroup();
+        for (int count : new int[]{3, 5, 8}) {
+            JRadioButtonMenuItem item = new JRadioButtonMenuItem(
+                    count + " " + I18nManager.getInstance().get("menu.settings.topProcesses.suffix"),
+                    config.getTopProcessCount() == count);
+            item.addItemListener(e -> {
+                if (item.isSelected()) {
+                    config.setTopProcessCount(count);
+                }
+            });
+            group.add(item);
+            topProcessMenu.add(item);
         }
-        int idx = speed == 0.5 ? 0 : speed == 2.0 ? 2 : 1;
-        if (idx < speedMenu.getItemCount() && speedMenu.getItem(idx) instanceof JCheckBoxMenuItem cb) {
-            cb.setSelected(true);
+    }
+
+    private void addRefreshItems(JMenu refreshMenu) {
+        ButtonGroup group = new ButtonGroup();
+        int[] refreshValues = {1000, 2000, 5000};
+        for (int refreshValue : refreshValues) {
+            String label = (refreshValue / 1000) + "s";
+            JRadioButtonMenuItem item = new JRadioButtonMenuItem(label, config.getDashboardRefreshMs() == refreshValue);
+            item.addItemListener(e -> {
+                if (item.isSelected()) {
+                    config.setDashboardRefreshMs(refreshValue);
+                }
+            });
+            group.add(item);
+            refreshMenu.add(item);
+        }
+    }
+
+    private void addPetClickItems(JMenu petClickMenu) {
+        ButtonGroup group = new ButtonGroup();
+        String current = config.getDesktopPetClickAction();
+        for (String action : new String[]{"bounce", "dashboard"}) {
+            JRadioButtonMenuItem item = new JRadioButtonMenuItem(
+                    I18nManager.getInstance().get("menu.settings.petClickAction." + action),
+                    action.equals(current));
+            item.addItemListener(e -> {
+                if (item.isSelected()) {
+                    config.setDesktopPetClickAction(action);
+                }
+            });
+            group.add(item);
+            petClickMenu.add(item);
         }
     }
 
@@ -257,7 +337,7 @@ public class TrayIconManager {
     }
 
     public void updateIcon() {
-        Image frame = animationManager.getNextFrame();
+        Image frame = trayPlayback.nextFrame();
         if (frame != null) trayIcon.setImage(frame);
         updateTooltip();
     }
@@ -316,7 +396,11 @@ public class TrayIconManager {
         @Override
         public void mouseClicked(MouseEvent e) {
             if (e.getButton() == MouseEvent.BUTTON1) {
-                DashboardWindow.showOrFocus();
+                if (DashboardWindow.isDashboardVisible()) {
+                    DashboardWindow.hideInstance();
+                } else {
+                    DashboardWindow.showOrFocus();
+                }
             }
         }
 

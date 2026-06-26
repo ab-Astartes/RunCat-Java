@@ -4,6 +4,7 @@ import com.runcat.config.AppConfig;
 import com.runcat.i18n.I18nManager;
 
 import javax.imageio.ImageIO;
+import javax.swing.ImageIcon;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.*;
@@ -23,9 +24,6 @@ public class AnimationManager {
     private static final int ICON_SIZE = 16;
 
     private final AppConfig config;
-    private List<Image> currentFrames;
-    private int currentFrameIndex = 0;
-
     private final Map<String, List<Image>> builtInAnimations;
     private final Map<String, List<Image>> customAnimations;
     private final Map<String, List<Image>> hiResCache; // 64x64 frames for desktop pet
@@ -131,6 +129,7 @@ public class AnimationManager {
     }
 
     private void loadCustomAnimations() {
+        customAnimations.clear();
         Path animDir = Paths.get(ANIMATIONS_DIR);
         if (!Files.exists(animDir)) return;
 
@@ -152,12 +151,7 @@ public class AnimationManager {
     private List<Image> loadFramesFromDirectory(Path dir) {
         List<Image> frames = new ArrayList<>();
         try {
-            List<Path> pngFiles = new ArrayList<>();
-            try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "*.png")) {
-                for (Path p : stream) pngFiles.add(p);
-            }
-            pngFiles.sort(Comparator.comparing(p -> p.getFileName().toString()));
-
+            List<Path> pngFiles = listAnimationFrames(dir);
             for (Path pngFile : pngFiles) {
                 BufferedImage img = ImageIO.read(pngFile.toFile());
                 if (img != null) {
@@ -178,47 +172,31 @@ public class AnimationManager {
     }
 
     public void setCurrentAnimation(String name) {
-        List<Image> frames = null;
-        if (builtInAnimations.containsKey(name)) {
-            frames = builtInAnimations.get(name);
-        } else if (customAnimations.containsKey(name)) {
-            frames = customAnimations.get(name);
+        if (!builtInAnimations.containsKey(name) && !customAnimations.containsKey(name)) {
+            name = "cat";
         }
-
-        if (frames == null || frames.isEmpty()) {
-            frames = builtInAnimations.getOrDefault("cat", generatePlaceholderFrames("cat"));
-        }
-
-        this.currentFrames = frames;
-        this.currentFrameIndex = 0;
         config.setCurrentAnimation(name);
     }
 
     public Image getNextFrame() {
-        if (currentFrames == null || currentFrames.isEmpty()) return null;
-        Image frame = currentFrames.get(currentFrameIndex);
-        currentFrameIndex = (currentFrameIndex + 1) % currentFrames.size();
-        return frame;
+        return createTrayPlayback().nextFrame();
     }
 
     public Image getCurrentFrame() {
-        if (currentFrames == null || currentFrames.isEmpty()) return null;
-        return currentFrames.get(currentFrameIndex);
+        return getTrayFrames().stream().findFirst().orElse(null);
     }
 
     public boolean importCustomAnimation(String name, Path sourceDir) {
         if (!Files.isDirectory(sourceDir)) return false;
         List<Image> frames = loadFramesFromDirectory(sourceDir);
-        if (frames.isEmpty()) return false;
+        if (frames.size() < 2) return false;
 
         Path targetDir = Paths.get(ANIMATIONS_DIR, name);
         try {
             Files.createDirectories(targetDir);
-            try (DirectoryStream<Path> stream = Files.newDirectoryStream(sourceDir, "*.png")) {
-                for (Path src : stream) {
-                    Path dest = targetDir.resolve(src.getFileName());
-                    Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
-                }
+            for (Path src : listAnimationFrames(sourceDir)) {
+                Path dest = targetDir.resolve(src.getFileName());
+                Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
             }
             customAnimations.put(name, frames);
             return true;
@@ -268,6 +246,14 @@ public class AnimationManager {
         return config.getCurrentAnimation();
     }
 
+    public AnimationPlayback createTrayPlayback() {
+        return new AnimationPlayback(this::getTrayFrames);
+    }
+
+    public AnimationPlayback createPetPlayback() {
+        return new AnimationPlayback(this::getPetFrames);
+    }
+
     public String getAnimationDisplayName(String name) {
         I18nManager i18n = I18nManager.getInstance();
         String key = "anim." + name;
@@ -284,23 +270,127 @@ public class AnimationManager {
      * Uses the same animation as the tray icon.
      */
     public Image getNextHiResFrame() {
-        String current = config.getCurrentAnimation();
-        List<Image> frames = hiResCache.get(current);
+        return createPetPlayback().nextFrame();
+    }
+
+    public List<String> getAllAnimationNames() {
+        List<String> names = new ArrayList<>(builtInAnimations.keySet());
+        names.addAll(customAnimations.keySet());
+        return names;
+    }
+
+    public boolean isBuiltInAnimation(String name) {
+        return builtInAnimations.containsKey(name);
+    }
+
+    public ImageIcon createPreviewIcon(String animationName, int size) {
+        List<Image> frames = customAnimations.containsKey(animationName)
+                ? customAnimations.get(animationName)
+                : builtInAnimations.get(animationName);
         if (frames == null || frames.isEmpty()) {
-            // Fallback: scale up from 16x16
-            Image loRes = getNextFrame();
-            if (loRes == null) return null;
-            BufferedImage scaled = new BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D g = scaled.createGraphics();
-            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g.drawImage(loRes, 0, 0, 64, 64, null);
-            g.dispose();
+            return null;
+        }
+        Image frame = frames.get(0);
+        BufferedImage scaled = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = scaled.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.drawImage(frame, 0, 0, size, size, null);
+        g.dispose();
+        return new ImageIcon(scaled);
+    }
+
+    public List<Path> listAnimationFrames(Path dir) {
+        List<Path> pngFiles = new ArrayList<>();
+        if (dir == null || !Files.isDirectory(dir)) {
+            return pngFiles;
+        }
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "*.png")) {
+            for (Path path : stream) {
+                pngFiles.add(path);
+            }
+        } catch (IOException ignored) {
+            return List.of();
+        }
+        pngFiles.sort(Comparator.comparing(path -> naturalSortKey(path.getFileName().toString())));
+        return pngFiles;
+    }
+
+    public boolean renameCustomAnimation(String oldName, String newName) {
+        if (!customAnimations.containsKey(oldName) || newName == null || newName.isBlank()) {
+            return false;
+        }
+        Path source = Paths.get(ANIMATIONS_DIR, oldName);
+        Path target = Paths.get(ANIMATIONS_DIR, newName);
+        try {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+            loadCustomAnimations();
+            if (config.getCurrentAnimation().equals(oldName)) {
+                setCurrentAnimation(newName);
+            }
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private List<Image> getTrayFrames() {
+        return getFrames(config.getCurrentAnimation(), false);
+    }
+
+    private List<Image> getPetFrames() {
+        List<Image> frames = getFrames(config.getCurrentAnimation(), true);
+        if (frames.isEmpty()) {
+            return getFrames("cat", true);
+        }
+        return frames;
+    }
+
+    private List<Image> getFrames(String name, boolean hiRes) {
+        List<Image> frames = hiRes ? hiResCache.get(name) : builtInAnimations.get(name);
+        if (!hiRes && customAnimations.containsKey(name)) {
+            frames = customAnimations.get(name);
+        }
+        if (frames != null && !frames.isEmpty()) {
+            return frames;
+        }
+        if (hiRes) {
+            List<Image> lowRes = getFrames(name, false);
+            if (lowRes.isEmpty()) {
+                return List.of();
+            }
+            List<Image> scaled = new ArrayList<>();
+            for (Image frame : lowRes) {
+                BufferedImage scaledFrame = new BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB);
+                Graphics2D g = scaledFrame.createGraphics();
+                g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.drawImage(frame, 0, 0, 64, 64, null);
+                g.dispose();
+                scaled.add(scaledFrame);
+            }
             return scaled;
         }
-        // Use a separate frame counter for hi-res
-        // Just cycle using currentFrameIndex since it's already incremented by getNextFrame()
-        int idx = (currentFrameIndex - 1 + frames.size()) % frames.size();
-        return frames.get(idx);
+        return builtInAnimations.getOrDefault("cat", generatePlaceholderFrames("cat"));
+    }
+
+    private String naturalSortKey(String fileName) {
+        StringBuilder key = new StringBuilder();
+        StringBuilder digits = new StringBuilder();
+        for (char c : fileName.toCharArray()) {
+            if (Character.isDigit(c)) {
+                digits.append(c);
+            } else {
+                if (digits.length() > 0) {
+                    key.append(String.format("%08d", Integer.parseInt(digits.toString())));
+                    digits.setLength(0);
+                }
+                key.append(Character.toLowerCase(c));
+            }
+        }
+        if (digits.length() > 0) {
+            key.append(String.format("%08d", Integer.parseInt(digits.toString())));
+        }
+        return key.toString();
     }
 }

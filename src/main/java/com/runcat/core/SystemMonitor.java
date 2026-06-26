@@ -4,10 +4,14 @@ import com.runcat.RunCatApp;
 import com.runcat.config.AppConfig;
 import com.runcat.i18n.I18nManager;
 
-import java.awt.*;
+import java.awt.Image;
+import java.awt.SystemTray;
+import java.awt.Toolkit;
+import java.awt.TrayIcon;
 import java.io.*;
 import java.nio.file.*;
-import java.util.*;
+import java.util.LinkedList;
+import java.util.List;
 
 /**
  * Monitors system CPU, memory, disk I/O, and network usage
@@ -40,6 +44,8 @@ public class SystemMonitor {
     private double netUploadKBps = 0;
     private double netDownloadKBps = 0;
     private long lastNetSampleTime = 0;
+    private final ProcessMetricsCollector processMetricsCollector;
+    private volatile MonitorSnapshot latestSnapshot = MonitorSnapshot.empty();
 
     public SystemMonitor() {
         this.osBean = (com.sun.management.OperatingSystemMXBean)
@@ -48,6 +54,7 @@ public class SystemMonitor {
         this.memoryUsage = 0;
         this.lastDiskSampleTime = System.currentTimeMillis();
         this.lastNetSampleTime = System.currentTimeMillis();
+        this.processMetricsCollector = new ProcessMetricsCollector();
     }
 
     public void update() {
@@ -74,6 +81,23 @@ public class SystemMonitor {
 
         // Check CPU alert
         checkCpuAlert();
+
+        List<ProcessUsageSnapshot> processSamples = processMetricsCollector.collect();
+        int topProcessCount = Math.max(1, RunCatApp.config().getTopProcessCount());
+        latestSnapshot = new MonitorSnapshot(
+                System.currentTimeMillis(),
+                cpuUsage,
+                memoryUsage,
+                diskReadKBps,
+                diskWriteKBps,
+                netDownloadKBps,
+                netUploadKBps,
+                getCpuHistory(),
+                getMemHistory(),
+                ProcessMetricsCollector.topNByCpu(processSamples, topProcessCount),
+                ProcessMetricsCollector.topNByMemory(processSamples, topProcessCount),
+                ProcessMetricsCollector.topNByDisk(processSamples, topProcessCount),
+                ProcessMetricsCollector.topNByNetwork(processSamples, topProcessCount));
     }
 
     private void updateDiskStats() {
@@ -131,19 +155,29 @@ public class SystemMonitor {
 
     private void updateNetworkStats() {
         try {
-            // Read from /proc/net/dev equivalent on Windows via netstat or wmic
-            ProcessBuilder pb = new ProcessBuilder("wmic", "path", "Win32_PerfRawData_Tcpip_NetworkInterface",
-                    "get", "BytesReceivedPerSec,BytesSentPerSec", "/format:value");
+            // Use netstat -e which outputs cumulative bytes received/sent
+            long totalRecv = 0, totalSent = 0;
+            ProcessBuilder pb = new ProcessBuilder("netstat", "-e");
+            pb.redirectErrorStream(true);
             Process p = pb.start();
             BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
-            long totalRecv = 0, totalSent = 0;
             String line;
             while ((line = reader.readLine()) != null) {
                 line = line.trim();
-                if (line.startsWith("BytesReceivedPerSec=")) {
-                    try { totalRecv += Long.parseLong(line.substring(20)); } catch (NumberFormatException ignored) {}
-                } else if (line.startsWith("BytesSentPerSec=")) {
-                    try { totalSent += Long.parseLong(line.substring(16)); } catch (NumberFormatException ignored) {}
+                if (line.isEmpty()) continue;
+                // Match the numeric data line (after any header lines, locale-independent)
+                // On Windows the line contains two large numbers separated by spaces
+                String[] parts = line.split("\\s+");
+                if (parts.length >= 2) {
+                    try {
+                        long v1 = Long.parseLong(parts[0]);
+                        long v2 = Long.parseLong(parts[1]);
+                        // Skip if either value is too small (likely a header or other data)
+                        if (v1 > 1000000 || v2 > 1000000) {
+                            totalRecv = v1;
+                            totalSent = v2;
+                        }
+                    } catch (NumberFormatException ignored) {}
                 }
             }
             p.waitFor();
@@ -160,7 +194,7 @@ public class SystemMonitor {
             lastNetBytesSent = totalSent;
             lastNetSampleTime = now;
         } catch (Exception ignored) {
-            // Network stats unavailable - show N/A
+            // Network stats unavailable
         }
     }
 
@@ -223,5 +257,9 @@ public class SystemMonitor {
         long freeMem = osBean.getFreeMemorySize();
         long usedMem = totalMem - freeMem;
         return String.format("%.0f MB / %.0f MB", usedMem / 1e6, totalMem / 1e6);
+    }
+
+    public MonitorSnapshot getSnapshot() {
+        return latestSnapshot;
     }
 }

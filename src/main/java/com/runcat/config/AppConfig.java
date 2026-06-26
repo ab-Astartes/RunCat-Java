@@ -53,6 +53,10 @@ public class AppConfig {
     private int desktopPetX = -1;
     private int desktopPetY = -1;
     private double desktopPetOpacity = 1.0;    // 0.0 ~ 1.0
+    private String desktopPetClickAction = "bounce";
+    private int topProcessCount = 5;
+    private int dashboardRefreshMs = 1000;
+    private boolean animationSmoothingEnabled = true;
 
     public AppConfig() {}
 
@@ -146,6 +150,31 @@ public class AppConfig {
 
     public double getDesktopPetOpacity() { return desktopPetOpacity; }
     public void setDesktopPetOpacity(double desktopPetOpacity) { this.desktopPetOpacity = desktopPetOpacity; save(); }
+
+    public String getDesktopPetClickAction() { return desktopPetClickAction; }
+    public void setDesktopPetClickAction(String desktopPetClickAction) {
+        this.desktopPetClickAction = (desktopPetClickAction == null || desktopPetClickAction.isBlank())
+                ? "bounce" : desktopPetClickAction;
+        save();
+    }
+
+    public int getTopProcessCount() { return Math.max(1, topProcessCount); }
+    public void setTopProcessCount(int topProcessCount) {
+        this.topProcessCount = Math.max(1, topProcessCount);
+        save();
+    }
+
+    public int getDashboardRefreshMs() { return Math.max(500, dashboardRefreshMs); }
+    public void setDashboardRefreshMs(int dashboardRefreshMs) {
+        this.dashboardRefreshMs = Math.max(500, dashboardRefreshMs);
+        save();
+    }
+
+    public boolean isAnimationSmoothingEnabled() { return animationSmoothingEnabled; }
+    public void setAnimationSmoothingEnabled(boolean animationSmoothingEnabled) {
+        this.animationSmoothingEnabled = animationSmoothingEnabled;
+        save();
+    }
 
     public void saveDesktopPetPosition(int x, int y) {
         this.desktopPetX = x;
