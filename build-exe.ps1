@@ -57,6 +57,7 @@ $jpackageArgs = @(
     "--java-options", "--enable-native-access=ALL-UNNAMED",
     "--java-options", "-Dfile.encoding=UTF-8",
     "--java-options", "-Dsun.jnu.encoding=UTF-8",
+    "--java-options", "-Xmx256m",
     "--dest", "dist"
 )
 
