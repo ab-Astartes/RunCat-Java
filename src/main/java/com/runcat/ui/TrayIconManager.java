@@ -55,8 +55,23 @@ public class TrayIconManager {
         this.trayIcon.addMouseListener(new TrayIconMouseListener());
     }
 
+    private boolean menuRebuildPending = false;
+
     public void rebuildMenu() {
-        SwingUtilities.invokeLater(() -> popupMenu = createPopupMenu());
+        if (popupMenu != null && popupMenu.isVisible()) {
+            // Don't rebuild while menu is showing — schedule it for after close
+            menuRebuildPending = true;
+        } else {
+            SwingUtilities.invokeLater(() -> popupMenu = createPopupMenu());
+        }
+    }
+
+    /** Called when popup menu closes — execute any pending rebuild */
+    private void onMenuClosed() {
+        if (menuRebuildPending) {
+            menuRebuildPending = false;
+            SwingUtilities.invokeLater(() -> popupMenu = createPopupMenu());
+        }
     }
 
     private JPopupMenu createPopupMenu() {
@@ -353,11 +368,13 @@ public class TrayIconManager {
                 @Override
                 public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) {
                     cleanupAfterMenuClose();
+                    onMenuClosed();
                 }
 
                 @Override
                 public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) {
                     cleanupAfterMenuClose();
+                    onMenuClosed();
                 }
             });
 

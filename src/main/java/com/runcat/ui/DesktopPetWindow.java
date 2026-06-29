@@ -172,8 +172,9 @@ public class DesktopPetWindow extends JWindow {
         petLabel.addMouseListener(mouseAdapter);
         petLabel.addMouseMotionListener(mouseAdapter);
 
-        // Right-click menu
+        // Right-click menu (with auto-dismiss for transparent JWindow)
         JPopupMenu popupMenu = createPopupMenu();
+        installPetMenuAutoDismiss(popupMenu);
         contentPanel.setComponentPopupMenu(popupMenu);
         shadowPanel.setComponentPopupMenu(popupMenu);
         petLabel.setComponentPopupMenu(popupMenu);
@@ -250,6 +251,79 @@ public class DesktopPetWindow extends JWindow {
         menu.add(hideItem);
 
         return menu;
+    }
+
+    /**
+     * Auto-dismiss the pet's popup menu when the mouse moves away.
+     * Because DesktopPetWindow is a transparent always-on-top JWindow,
+     * Swing's default "click outside to close" mechanism doesn't work —
+     * clicks on the desktop pass through the transparent window.
+     * So we poll MouseInfo and close the menu when the cursor leaves
+     * the menu bounds for a sustained period.
+     */
+    private Timer petMenuDismissTimer;
+    private long petMenuShownTime;
+
+    private void installPetMenuAutoDismiss(JPopupMenu menu) {
+        menu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
+            @Override
+            public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {
+                petMenuShownTime = System.currentTimeMillis();
+                startPetMenuDismissPoll(menu);
+            }
+
+            @Override
+            public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) {
+                stopPetMenuDismissPoll();
+            }
+
+            @Override
+            public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) {
+                stopPetMenuDismissPoll();
+            }
+        });
+    }
+
+    private void startPetMenuDismissPoll(JPopupMenu menu) {
+        stopPetMenuDismissPoll();
+        petMenuDismissTimer = new Timer(150, e -> {
+            if (!menu.isVisible()) {
+                stopPetMenuDismissPoll();
+                return;
+            }
+            // Don't dismiss too quickly after showing
+            if (System.currentTimeMillis() - petMenuShownTime < 400) return;
+
+            Point mouse = MouseInfo.getPointerInfo().getLocation();
+            try {
+                Rectangle menuBounds = new Rectangle(menu.getLocationOnScreen(), menu.getSize());
+                if (menuBounds.contains(mouse)) return;
+
+                // Check sub-menus too
+                for (MenuElement elem : MenuSelectionManager.defaultManager().getSelectedPath()) {
+                    if (elem instanceof JPopupMenu subMenu && subMenu.isVisible()) {
+                        try {
+                            Rectangle subBounds = new Rectangle(subMenu.getLocationOnScreen(), subMenu.getSize());
+                            if (subBounds.contains(mouse)) return;
+                        } catch (Exception ex) { /* ignore */ }
+                    }
+                }
+
+                // Mouse outside all menus — dismiss
+                menu.setVisible(false);
+                stopPetMenuDismissPoll();
+            } catch (Exception ex) {
+                stopPetMenuDismissPoll();
+            }
+        });
+        petMenuDismissTimer.start();
+    }
+
+    private void stopPetMenuDismissPoll() {
+        if (petMenuDismissTimer != null) {
+            petMenuDismissTimer.stop();
+            petMenuDismissTimer = null;
+        }
     }
 
     private void startAnimation() {
@@ -499,6 +573,7 @@ public class DesktopPetWindow extends JWindow {
     @Override
     public void dispose() {
         stopAnimation();
+        stopPetMenuDismissPoll();
         if (stateResetTimer != null) {
             stateResetTimer.stop();
         }
