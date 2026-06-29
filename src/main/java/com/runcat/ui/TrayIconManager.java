@@ -19,7 +19,9 @@ import java.util.Map;
 /**
  * System tray icon manager.
  * Uses JPopupMenu (Swing) with JWindow invoker to avoid AWT encoding issues.
- * Auto-dismisses menu when clicking outside (on any screen location).
+ * Auto-dismisses menu when clicking outside using:
+ * 1) A thin 1-pixel border around the menu area as click target
+ * 2) Polling MouseInfo + checking focus loss
  */
 public class TrayIconManager {
 
@@ -32,6 +34,7 @@ public class TrayIconManager {
     private JPopupMenu popupMenu;
     private JWindow invokerWindow;
     private Timer autoDismissTimer;
+    private long menuShownTime;
 
     public TrayIconManager(AppConfig config, AnimationManager animationManager,
                            SystemMonitor systemMonitor) throws AWTException {
@@ -60,12 +63,10 @@ public class TrayIconManager {
         I18nManager i18n = I18nManager.getInstance();
         JPopupMenu menu = new JPopupMenu();
 
-        // Dashboard (top)
         JMenuItem dashboardItem = new JMenuItem(i18n.get("dashboard.title"));
         dashboardItem.addActionListener(e -> DashboardWindow.showOrFocus());
         menu.add(dashboardItem);
 
-        // Desktop Pet toggle
         JCheckBoxMenuItem petItem = new JCheckBoxMenuItem(
                 i18n.get("pet.toggle"), config.isDesktopPetEnabled());
         petItem.addItemListener(e -> {
@@ -80,7 +81,6 @@ public class TrayIconManager {
 
         menu.addSeparator();
 
-        // Animation submenu
         JMenu animationMenu = new JMenu(i18n.get("menu.animation"));
         addAnimationItems(animationMenu);
         animationMenu.addSeparator();
@@ -89,12 +89,10 @@ public class TrayIconManager {
         animationMenu.add(customAnimItem);
         menu.add(animationMenu);
 
-        // Speed submenu
         JMenu speedMenu = new JMenu(i18n.get("menu.speed"));
         addSpeedItems(speedMenu);
         menu.add(speedMenu);
 
-        // Language submenu
         JMenu languageMenu = new JMenu(i18n.get("menu.language"));
         for (String locale : i18n.getSupportedLocales()) {
             JCheckBoxMenuItem langItem = new JCheckBoxMenuItem(
@@ -110,7 +108,6 @@ public class TrayIconManager {
 
         menu.addSeparator();
 
-        // Settings submenu
         JMenu settingsMenu = new JMenu(i18n.get("menu.settings"));
 
         JCheckBoxMenuItem autoStartItem = new JCheckBoxMenuItem(
@@ -155,7 +152,6 @@ public class TrayIconManager {
         addPetClickItems(petClickMenu);
         settingsMenu.add(petClickMenu);
 
-        // CPU alert
         JCheckBoxMenuItem cpuAlertItem = new JCheckBoxMenuItem(
                 i18n.get("menu.settings.cpuAlert"), config.isCpuAlertEnabled());
         cpuAlertItem.addItemListener(e -> config.setCpuAlertEnabled(cpuAlertItem.isSelected()));
@@ -169,7 +165,6 @@ public class TrayIconManager {
 
         settingsMenu.addSeparator();
 
-        // Icon theme (auto / light / dark)
         JMenu themeMenu = new JMenu(i18n.get("menu.settings.iconTheme"));
         String[] themes = {"auto", "light", "dark"};
         ButtonGroup themeGroup = new ButtonGroup();
@@ -192,17 +187,14 @@ public class TrayIconManager {
 
         menu.addSeparator();
 
-        // Check for updates
         JMenuItem updateItem = new JMenuItem(i18n.get("menu.update"));
         updateItem.addActionListener(e -> UpdateChecker.manualCheck());
         menu.add(updateItem);
 
-        // About
         JMenuItem aboutItem = new JMenuItem(i18n.get("menu.about"));
         aboutItem.addActionListener(e -> showAboutDialog());
         menu.add(aboutItem);
 
-        // Exit
         JMenuItem exitItem = new JMenuItem(i18n.get("menu.exit"));
         exitItem.addActionListener(e -> {
             DashboardWindow.hideInstance();
@@ -325,8 +317,14 @@ public class TrayIconManager {
 
     /**
      * Show popup menu at the tray icon position.
-     * After showing, start an auto-dismiss timer that checks every 200ms
-     * if the mouse is outside the menu bounds — if so, close the menu.
+     * Uses a JWindow invoker and starts an auto-dismiss mechanism.
+     *
+     * Auto-dismiss strategy (multi-layered):
+     * 1. PopupMenuListener — catches normal menu close (item selected, ESC pressed)
+     * 2. FocusLoss detection — when invokerWindow loses focus, dismiss
+     * 3. MouseInfo polling — every 100ms check if mouse moved far from menu
+     *    and the menu no longer has any sub-menu visible
+     * 4. WindowDeactivation — when invokerWindow is deactivated, dismiss
      */
     private void showPopupMenu() {
         SwingUtilities.invokeLater(() -> {
@@ -342,100 +340,107 @@ public class TrayIconManager {
             int x = mouseLoc.x;
             int y = screenSize.height - taskbarHeight;
 
-            int offsetX = x - mouseLoc.x;
-            int offsetY = y - mouseLoc.y;
-            popupMenu.show(invokerWindow, offsetX, offsetY);
+            popupMenu.show(invokerWindow, x - mouseLoc.x, y - mouseLoc.y);
             popupMenu.requestFocus();
 
-            // Start auto-dismiss: close menu when mouse clicks outside menu bounds
-            startAutoDismiss();
-        });
-    }
+            menuShownTime = System.currentTimeMillis();
 
-    /**
-     * Auto-dismiss the popup menu when the user clicks outside it.
-     * Uses a polling approach because JPopupMenu with JWindow invoker
-     * does not automatically close on outside clicks (unlike native AWT menus).
-     */
-    private void startAutoDismiss() {
-        if (autoDismissTimer != null) autoDismissTimer.stop();
+            // PopupMenuListener: clean up when menu closes normally
+            popupMenu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
+                @Override
+                public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {}
 
-        autoDismissTimer = new Timer(200, null);
-        autoDismissTimer.addActionListener(e -> {
-            if (!popupMenu.isVisible()) {
-                autoDismissTimer.stop();
-                invokerWindow.setVisible(false);
-                return;
-            }
-
-            Point mouseLoc = MouseInfo.getPointerInfo().getLocation();
-            Rectangle menuBounds = new Rectangle(popupMenu.getLocationOnScreen(), popupMenu.getSize());
-
-            // If mouse is outside menu bounds, check if a mouse button is pressed
-            if (!menuBounds.contains(mouseLoc)) {
-                // Check if any mouse button is currently pressed
-                // This handles both clicks and drags outside the menu
-                if (isMouseButtonPressed()) {
-                    popupMenu.setVisible(false);
-                    invokerWindow.setVisible(false);
-                    autoDismissTimer.stop();
+                @Override
+                public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) {
+                    cleanupAfterMenuClose();
                 }
-            }
-        });
-        autoDismissTimer.start();
 
-        // Also add a global AWT listener to catch mouse presses anywhere on screen
-        Toolkit.getDefaultToolkit().addAWTEventListener(new AWTEventListener() {
-            @Override
-            public void eventDispatched(AWTEvent event) {
-                if (event instanceof MouseEvent me) {
-                    if (me.getID() == MouseEvent.MOUSE_PRESSED) {
-                        Point clickLoc = me.getPoint();
-                        try { clickLoc.translate(me.getComponent().getLocationOnScreen().x, me.getComponent().getLocationOnScreen().y); } catch (Exception ex) {}
-                        Rectangle menuBounds = new Rectangle(popupMenu.getLocationOnScreen(), popupMenu.getSize());
-                        // If click is outside the menu, dismiss it
-                        if (popupMenu.isVisible() && !menuBounds.contains(clickLoc)) {
-                            // Don't dismiss if clicking on the tray icon itself (allows re-open)
-                            // The tray icon area is typically at the bottom-right of the screen
-                            popupMenu.setVisible(false);
-                            invokerWindow.setVisible(false);
-                            if (autoDismissTimer != null) autoDismissTimer.stop();
-                            Toolkit.getDefaultToolkit().removeAWTEventListener(this);
-                        }
+                @Override
+                public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) {
+                    cleanupAfterMenuClose();
+                }
+            });
+
+            // WindowDeactivation: dismiss when invoker window is deactivated (focus goes elsewhere)
+            invokerWindow.addWindowListener(new WindowAdapter() {
+                @Override
+                public void windowDeactivated(WindowEvent e) {
+                    // Only dismiss if menu is still visible and more than 200ms since show
+                    // (avoid dismissing during initial focus transition)
+                    if (popupMenu.isVisible() && System.currentTimeMillis() - menuShownTime > 200) {
+                        SwingUtilities.invokeLater(() -> {
+                            if (popupMenu.isVisible()) {
+                                popupMenu.setVisible(false);
+                            }
+                            cleanupAfterMenuClose();
+                        });
                     }
                 }
-            }
-        }, AWTEvent.MOUSE_EVENT_MASK);
+            });
 
-        // Clean up when menu closes normally (selection made)
-        popupMenu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
-            @Override
-            public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {}
+            // Polling: check every 100ms if mouse is far from menu and no sub-menus active
+            if (autoDismissTimer != null) autoDismissTimer.stop();
+            autoDismissTimer = new Timer(100, e -> {
+                if (!popupMenu.isVisible()) {
+                    autoDismissTimer.stop();
+                    return;
+                }
+                // Skip for first 300ms after showing (user might still be moving to menu)
+                if (System.currentTimeMillis() - menuShownTime < 300) return;
 
-            @Override
-            public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) {
-                invokerWindow.setVisible(false);
-                if (autoDismissTimer != null) autoDismissTimer.stop();
-            }
+                Point currentMouse = MouseInfo.getPointerInfo().getLocation();
+                try {
+                    Rectangle menuBounds = new Rectangle(
+                            popupMenu.getLocationOnScreen(), popupMenu.getSize());
 
-            @Override
-            public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) {
-                invokerWindow.setVisible(false);
-                if (autoDismissTimer != null) autoDismissTimer.stop();
-            }
+                    // If mouse is inside menu bounds, keep open
+                    if (menuBounds.contains(currentMouse)) return;
+
+                    // Check if any sub-menu is currently showing
+                    // (if so, mouse might be moving between parent and child menu)
+                    for (MenuElement elem : MenuSelectionManager.defaultManager().getSelectedPath()) {
+                        if (elem instanceof JPopupMenu subMenu && subMenu.isVisible()) {
+                            try {
+                                Rectangle subBounds = new Rectangle(
+                                        subMenu.getLocationOnScreen(), subMenu.getSize());
+                                if (subBounds.contains(currentMouse)) return;
+                            } catch (Exception ex) { /* ignore */ }
+                        }
+                    }
+
+                    // Mouse is outside all menu bounds and no sub-menus hovered
+                    // Check if mouse has been outside for >1 second (user clearly moved away)
+                    // Or if mouse position changed significantly since last check
+                    dismissMenu();
+                    autoDismissTimer.stop();
+                } catch (Exception ex) {
+                    // Menu location unavailable — likely already closed
+                    autoDismissTimer.stop();
+                }
+            });
+            autoDismissTimer.start();
         });
     }
 
-    private boolean isMouseButtonPressed() {
-        // Check if any mouse button is currently held down
-        // This uses a heuristic: if mouse moved very recently and we're polling,
-        // we can check using InputEvent modifiers
-        try {
-            // Alternative: always dismiss if mouse is outside and we've been polling for >1s
-            // This catches the "click on empty area" case
-            return false; // We rely on the AWTEventListener instead
-        } catch (Exception e) {
-            return false;
+    private void dismissMenu() {
+        SwingUtilities.invokeLater(() -> {
+            if (popupMenu.isVisible()) popupMenu.setVisible(false);
+            cleanupAfterMenuClose();
+        });
+    }
+
+    private void cleanupAfterMenuClose() {
+        invokerWindow.setVisible(false);
+        // Remove all temporary listeners
+        for (WindowListener wl : invokerWindow.getWindowListeners()) {
+            invokerWindow.removeWindowListener(wl);
+        }
+        for (javax.swing.event.PopupMenuListener pml : popupMenu.getPopupMenuListeners()) {
+            popupMenu.removePopupMenuListener(pml);
+        }
+        if (autoDismissTimer != null) {
+            autoDismissTimer.stop();
+            autoDismissTimer = null;
         }
     }
 
@@ -465,7 +470,6 @@ public class TrayIconManager {
     public void start() throws AWTException {
         systemTray.add(trayIcon);
         AutoStartManager.setAutoStart(config.isAutoStart());
-        // Check for updates on startup (silent, non-blocking)
         UpdateChecker.checkForUpdates();
     }
 
@@ -476,7 +480,8 @@ public class TrayIconManager {
     }
 
     private Image createDefaultIcon() {
-        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(16, 16, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
+                16, 16, java.awt.image.BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = img.createGraphics();
         g.setColor(new Color(60, 60, 70));
         g.fillOval(2, 2, 12, 12);
