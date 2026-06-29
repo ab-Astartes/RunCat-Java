@@ -196,11 +196,20 @@ public class UpdateChecker {
                 sb.append("    Write-Host \"Process exited.\"\n");
                 sb.append("}\n");
                 sb.append("Start-Sleep -Seconds 2\n\n");
-                sb.append("Write-Host \"Copying new files...\"\n");
-                sb.append("Get-ChildItem -Path '").append(currentAppDir).append("' -Exclude '.java-runcat' |\n");
-                sb.append("    Where-Object { $_.Name -ne 'app' } |\n");
-                sb.append("    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue\n\n");
-                sb.append("Copy-Item -Path '").append(newAppDir).append("\\*' -Destination '").append(currentAppDir).append("' -Recurse -Force\n\n");
+                sb.append("Write-Host \"Updating application files...\"\n");
+                // Replace exe
+                sb.append("Copy-Item -Path '").append(newAppDir).append("\\JavaRunCat.exe' -Destination '").append(currentAppDir).append("\\JavaRunCat.exe' -Force\n");
+                // Replace app directory (jar files)
+                sb.append("Remove-Item -Path '").append(currentAppDir).append("\\app' -Recurse -Force -ErrorAction SilentlyContinue\n");
+                sb.append("Copy-Item -Path '").append(newAppDir).append("\\app' -Destination '").append(currentAppDir).append("\\app' -Recurse -Force\n");
+                // Replace runtime directory if changed
+                sb.append("$oldRuntimeHash = (Get-ChildItem '").append(currentAppDir).append("\\runtime' -Recurse | Measure-Object -Property Length -Sum).Sum\n");
+                sb.append("$newRuntimeHash = (Get-ChildItem '").append(newAppDir).append("\\runtime' -Recurse | Measure-Object -Property Length -Sum).Sum\n");
+                sb.append("if ($oldRuntimeHash -ne $newRuntimeHash) {\n");
+                sb.append("    Write-Host \"Runtime changed, updating...\"\n");
+                sb.append("    Remove-Item -Path '").append(currentAppDir).append("\\runtime' -Recurse -Force -ErrorAction SilentlyContinue\n");
+                sb.append("    Copy-Item -Path '").append(newAppDir).append("\\runtime' -Destination '").append(currentAppDir).append("\\runtime' -Recurse -Force\n");
+                sb.append("}\n\n");
                 sb.append("Write-Host \"Starting new version...\"\n");
                 sb.append("Start-Process -FilePath '").append(currentAppDir).append("\\JavaRunCat.exe' -ArgumentList '--silent'\n\n");
                 sb.append("Start-Sleep -Seconds 5\n");
