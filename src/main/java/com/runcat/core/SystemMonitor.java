@@ -102,21 +102,37 @@ public class SystemMonitor {
 
     private void updateDiskStats() {
         try {
-            // Use Windows performance counter via wmic
-            ProcessBuilder pb = new ProcessBuilder("wmic", "logicaldisk", "get", "ReadBytesPerSec,WriteBytesPerSec", "/format:value");
-            Process p = pb.start();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            // Use PowerShell to get disk IO counters (WMIC removed, Win11 deprecated)
             long totalRead = 0, totalWrite = 0;
-            String line;
-            while ((line = reader.readLine()) != null) {
-                line = line.trim();
-                if (line.startsWith("ReadBytesPerSec=")) {
-                    try { totalRead += Long.parseLong(line.substring(16)); } catch (NumberFormatException ignored) {}
-                } else if (line.startsWith("WriteBytesPerSec=")) {
-                    try { totalWrite += Long.parseLong(line.substring(17)); } catch (NumberFormatException ignored) {}
+            File scriptFile = File.createTempFile("runcat-disk-", ".ps1");
+            scriptFile.deleteOnExit();
+            try (FileWriter fw = new FileWriter(scriptFile, java.nio.charset.StandardCharsets.UTF_8)) {
+                fw.write("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n");
+                fw.write("$disk = Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk | Where-Object { $_.Name -eq '_Total' }\n");
+                fw.write("if ($disk) { '{0}|{1}' -f $disk.DiskReadBytesPersec, $disk.DiskWriteBytesPersec }\n");
+            }
+            ProcessBuilder pb = new ProcessBuilder(
+                    "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-File", scriptFile.getAbsolutePath());
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if (line.isEmpty() || line.startsWith("[")) continue;
+                    String[] parts = line.split("\\|");
+                    if (parts.length >= 2) {
+                        try {
+                            totalRead = Long.parseLong(parts[0].trim());
+                            totalWrite = Long.parseLong(parts[1].trim());
+                        } catch (NumberFormatException ignored) {}
+                    }
                 }
             }
-            p.waitFor();
+            p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
+            scriptFile.delete();
 
             long now = System.currentTimeMillis();
             double elapsed = (now - lastDiskSampleTime) / 1000.0;
@@ -130,7 +146,6 @@ public class SystemMonitor {
             lastDiskWriteBytes = totalWrite;
             lastDiskSampleTime = now;
         } catch (Exception e) {
-            // Fallback: use simple file store stats
             updateDiskStatsFallback();
         }
     }
@@ -165,19 +180,24 @@ public class SystemMonitor {
             while ((line = reader.readLine()) != null) {
                 line = line.trim();
                 if (line.isEmpty()) continue;
-                // Match the numeric data line (after any header lines, locale-independent)
-                // On Windows the line contains two large numbers separated by spaces
+                // Find the line with two large cumulative byte numbers (locale-independent)
+                // Chinese: "字节  3628365290  2559373627" → parts=["字节","3628365290","2559373627"]
+                // English: "Bytes  3628365290  2559373627" → parts=["Bytes","3628365290","2559373627"]
+                // Strategy: find two long values > 1M in the line
                 String[] parts = line.split("\\s+");
-                if (parts.length >= 2) {
+                long[] bigNums = new long[2];
+                int bigCount = 0;
+                for (String part : parts) {
                     try {
-                        long v1 = Long.parseLong(parts[0]);
-                        long v2 = Long.parseLong(parts[1]);
-                        // Skip if either value is too small (likely a header or other data)
-                        if (v1 > 1000000 || v2 > 1000000) {
-                            totalRecv = v1;
-                            totalSent = v2;
+                        long v = Long.parseLong(part);
+                        if (v > 1000000 && bigCount < 2) {
+                            bigNums[bigCount++] = v;
                         }
                     } catch (NumberFormatException ignored) {}
+                }
+                if (bigCount == 2) {
+                    totalRecv = bigNums[0];
+                    totalSent = bigNums[1];
                 }
             }
             p.waitFor();

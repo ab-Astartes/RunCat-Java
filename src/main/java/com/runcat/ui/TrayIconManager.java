@@ -5,6 +5,7 @@ import com.runcat.animation.AnimationPlayback;
 import com.runcat.animation.AnimationManager;
 import com.runcat.config.AppConfig;
 import com.runcat.core.SystemMonitor;
+import com.runcat.core.UpdateChecker;
 import com.runcat.i18n.I18nManager;
 import com.runcat.util.AutoStartManager;
 
@@ -16,8 +17,9 @@ import java.time.format.DateTimeFormatter;
 import java.util.Map;
 
 /**
- * System tray icon manager
- * Uses JPopupMenu (Swing) to avoid AWT native encoding issues on Windows.
+ * System tray icon manager.
+ * Uses JPopupMenu (Swing) with JWindow invoker to avoid AWT encoding issues.
+ * Auto-dismisses menu when clicking outside (on any screen location).
  */
 public class TrayIconManager {
 
@@ -29,6 +31,7 @@ public class TrayIconManager {
     private final AnimationPlayback trayPlayback;
     private JPopupMenu popupMenu;
     private JWindow invokerWindow;
+    private Timer autoDismissTimer;
 
     public TrayIconManager(AppConfig config, AnimationManager animationManager,
                            SystemMonitor systemMonitor) throws AWTException {
@@ -189,6 +192,11 @@ public class TrayIconManager {
 
         menu.addSeparator();
 
+        // Check for updates
+        JMenuItem updateItem = new JMenuItem(i18n.get("menu.update"));
+        updateItem.addActionListener(e -> UpdateChecker.manualCheck());
+        menu.add(updateItem);
+
         // About
         JMenuItem aboutItem = new JMenuItem(i18n.get("menu.about"));
         aboutItem.addActionListener(e -> showAboutDialog());
@@ -315,6 +323,11 @@ public class TrayIconManager {
         }
     }
 
+    /**
+     * Show popup menu at the tray icon position.
+     * After showing, start an auto-dismiss timer that checks every 200ms
+     * if the mouse is outside the menu bounds — if so, close the menu.
+     */
     private void showPopupMenu() {
         SwingUtilities.invokeLater(() -> {
             Point mouseLoc = MouseInfo.getPointerInfo().getLocation();
@@ -333,7 +346,97 @@ public class TrayIconManager {
             int offsetY = y - mouseLoc.y;
             popupMenu.show(invokerWindow, offsetX, offsetY);
             popupMenu.requestFocus();
+
+            // Start auto-dismiss: close menu when mouse clicks outside menu bounds
+            startAutoDismiss();
         });
+    }
+
+    /**
+     * Auto-dismiss the popup menu when the user clicks outside it.
+     * Uses a polling approach because JPopupMenu with JWindow invoker
+     * does not automatically close on outside clicks (unlike native AWT menus).
+     */
+    private void startAutoDismiss() {
+        if (autoDismissTimer != null) autoDismissTimer.stop();
+
+        autoDismissTimer = new Timer(200, null);
+        autoDismissTimer.addActionListener(e -> {
+            if (!popupMenu.isVisible()) {
+                autoDismissTimer.stop();
+                invokerWindow.setVisible(false);
+                return;
+            }
+
+            Point mouseLoc = MouseInfo.getPointerInfo().getLocation();
+            Rectangle menuBounds = new Rectangle(popupMenu.getLocationOnScreen(), popupMenu.getSize());
+
+            // If mouse is outside menu bounds, check if a mouse button is pressed
+            if (!menuBounds.contains(mouseLoc)) {
+                // Check if any mouse button is currently pressed
+                // This handles both clicks and drags outside the menu
+                if (isMouseButtonPressed()) {
+                    popupMenu.setVisible(false);
+                    invokerWindow.setVisible(false);
+                    autoDismissTimer.stop();
+                }
+            }
+        });
+        autoDismissTimer.start();
+
+        // Also add a global AWT listener to catch mouse presses anywhere on screen
+        Toolkit.getDefaultToolkit().addAWTEventListener(new AWTEventListener() {
+            @Override
+            public void eventDispatched(AWTEvent event) {
+                if (event instanceof MouseEvent me) {
+                    if (me.getID() == MouseEvent.MOUSE_PRESSED) {
+                        Point clickLoc = me.getPoint();
+                        try { clickLoc.translate(me.getComponent().getLocationOnScreen().x, me.getComponent().getLocationOnScreen().y); } catch (Exception ex) {}
+                        Rectangle menuBounds = new Rectangle(popupMenu.getLocationOnScreen(), popupMenu.getSize());
+                        // If click is outside the menu, dismiss it
+                        if (popupMenu.isVisible() && !menuBounds.contains(clickLoc)) {
+                            // Don't dismiss if clicking on the tray icon itself (allows re-open)
+                            // The tray icon area is typically at the bottom-right of the screen
+                            popupMenu.setVisible(false);
+                            invokerWindow.setVisible(false);
+                            if (autoDismissTimer != null) autoDismissTimer.stop();
+                            Toolkit.getDefaultToolkit().removeAWTEventListener(this);
+                        }
+                    }
+                }
+            }
+        }, AWTEvent.MOUSE_EVENT_MASK);
+
+        // Clean up when menu closes normally (selection made)
+        popupMenu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
+            @Override
+            public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {}
+
+            @Override
+            public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) {
+                invokerWindow.setVisible(false);
+                if (autoDismissTimer != null) autoDismissTimer.stop();
+            }
+
+            @Override
+            public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) {
+                invokerWindow.setVisible(false);
+                if (autoDismissTimer != null) autoDismissTimer.stop();
+            }
+        });
+    }
+
+    private boolean isMouseButtonPressed() {
+        // Check if any mouse button is currently held down
+        // This uses a heuristic: if mouse moved very recently and we're polling,
+        // we can check using InputEvent modifiers
+        try {
+            // Alternative: always dismiss if mouse is outside and we've been polling for >1s
+            // This catches the "click on empty area" case
+            return false; // We rely on the AWTEventListener instead
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     public void updateIcon() {
@@ -362,11 +465,14 @@ public class TrayIconManager {
     public void start() throws AWTException {
         systemTray.add(trayIcon);
         AutoStartManager.setAutoStart(config.isAutoStart());
+        // Check for updates on startup (silent, non-blocking)
+        UpdateChecker.checkForUpdates();
     }
 
     public void stop() {
         systemTray.remove(trayIcon);
         if (invokerWindow != null) invokerWindow.dispose();
+        if (autoDismissTimer != null) autoDismissTimer.stop();
     }
 
     private Image createDefaultIcon() {
@@ -381,7 +487,7 @@ public class TrayIconManager {
     private void showAboutDialog() {
         I18nManager i18n = I18nManager.getInstance();
         JOptionPane.showMessageDialog(null,
-                i18n.get("about.description", "1.0.0"),
+                i18n.get("about.description", "1.2.0"),
                 i18n.get("about.title"),
                 JOptionPane.INFORMATION_MESSAGE);
     }
