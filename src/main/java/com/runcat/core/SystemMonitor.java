@@ -175,32 +175,32 @@ public class SystemMonitor {
             ProcessBuilder pb = new ProcessBuilder("netstat", "-e");
             pb.redirectErrorStream(true);
             Process p = pb.start();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                line = line.trim();
-                if (line.isEmpty()) continue;
-                // Find the line with two large cumulative byte numbers (locale-independent)
-                // Chinese: "字节  3628365290  2559373627" → parts=["字节","3628365290","2559373627"]
-                // English: "Bytes  3628365290  2559373627" → parts=["Bytes","3628365290","2559373627"]
-                // Strategy: find two long values > 1M in the line
-                String[] parts = line.split("\\s+");
-                long[] bigNums = new long[2];
-                int bigCount = 0;
-                for (String part : parts) {
-                    try {
-                        long v = Long.parseLong(part);
-                        if (v > 1000000 && bigCount < 2) {
-                            bigNums[bigCount++] = v;
-                        }
-                    } catch (NumberFormatException ignored) {}
-                }
-                if (bigCount == 2) {
-                    totalRecv = bigNums[0];
-                    totalSent = bigNums[1];
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if (line.isEmpty()) continue;
+                    // Find the line with cumulative byte numbers by picking the line
+                    // whose first numeric value is the largest across all lines.
+                    // Locale: "字节" / "Bytes" etc. We ignore the label and just
+                    // compare numeric values to isolate the bytes line.
+                    String[] parts = line.split("\\s+");
+                    long[] nums = new long[2];
+                    int numCount = 0;
+                    for (String part : parts) {
+                        try {
+                            long v = Long.parseLong(part);
+                            if (numCount < 2) nums[numCount++] = v;
+                        } catch (NumberFormatException ignored) {}
+                    }
+                    if (numCount == 2 && nums[0] > totalRecv) {
+                        totalRecv = nums[0];
+                        totalSent = nums[1];
+                    }
                 }
             }
-            p.waitFor();
+            p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
 
             long now = System.currentTimeMillis();
             double elapsed = (now - lastNetSampleTime) / 1000.0;
@@ -265,8 +265,8 @@ public class SystemMonitor {
 
     public String getNetworkUsageText() {
         I18nManager i18n = I18nManager.getInstance();
-        if (netDownloadKBps <= 0 && netUploadKBps <= 0) return i18n.get("monitor.notAvailable");
-        return String.format(i18n.get("monitor.netFormat"), netDownloadKBps, netUploadKBps);
+        if (lastNetBytesRecv <= 0) return i18n.get("monitor.notAvailable");
+        return String.format(i18n.get("monitor.netFormat"), Math.max(0, netDownloadKBps), Math.max(0, netUploadKBps));
     }
 
     public LinkedList<Double> getCpuHistory() { return new LinkedList<>(cpuHistory); }
