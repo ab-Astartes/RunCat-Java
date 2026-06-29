@@ -22,7 +22,23 @@ public class UpdateChecker {
     private static final String CURRENT_VERSION = "1.2.0";
     private static final AtomicBoolean updating = new AtomicBoolean(false);
 
+    /** Silent check on startup — no UI feedback if already latest */
     public static void checkForUpdates() {
+        checkForUpdates(false);
+    }
+
+    /** Manual check from menu — always gives UI feedback */
+    public static void manualCheck() {
+        if (updating.get()) {
+            I18nManager i18n = I18nManager.getInstance();
+            JOptionPane.showMessageDialog(null, i18n.get("update.inProgress"),
+                    i18n.get("update.title"), JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        checkForUpdates(true);
+    }
+
+    private static void checkForUpdates(boolean showNoUpdate) {
         if (updating.get()) return;
         new Thread(() -> {
             try {
@@ -75,21 +91,21 @@ public class UpdateChecker {
                             }
                         });
                     }
+                } else if (showNoUpdate) {
+                    // Manual check: tell user they're already up to date
+                    I18nManager i18n = I18nManager.getInstance();
+                    SwingUtilities.invokeLater(() ->
+                            JOptionPane.showMessageDialog(null,
+                                    i18n.get("update.noUpdate"),
+                                    i18n.get("update.title"),
+                                    JOptionPane.INFORMATION_MESSAGE));
                 }
                 conn.disconnect();
             } catch (Exception ignored) {}
         }, "UpdateCheckThread").start();
     }
 
-    public static void manualCheck() {
-        if (updating.get()) {
-            I18nManager i18n = I18nManager.getInstance();
-            JOptionPane.showMessageDialog(null, i18n.get("update.inProgress"),
-                    i18n.get("update.title"), JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
-        checkForUpdates();
-    }
+
 
     private static void performUpdate(String zipUrl, String zipName, String newVersion) {
         if (!updating.compareAndSet(false, true)) return;
