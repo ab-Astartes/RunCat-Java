@@ -208,33 +208,45 @@ public class DesktopPetWindow extends JWindow {
 
         menu.addSeparator();
 
-        // Pet size submenu
+        // Pet size submenu (single-select with ● prefix)
         JMenu sizeMenu = new JMenu(i18n.get("pet.size"));
         int[] sizes = {64, 96, 128};
+        int currentSizeSetting = config.getDesktopPetSize();
         for (int s : sizes) {
-            JCheckBoxMenuItem sizeItem = new JCheckBoxMenuItem(
-                    s + "px", s == config.getDesktopPetSize());
+            String label = (s == currentSizeSetting ? "● " : "    " ) + s + "px";
+            JMenuItem sizeItem = new JMenuItem(label);
             int finalSize = s;
             sizeItem.addActionListener(e -> {
                 config.setDesktopPetSize(finalSize);
                 currentSize = finalSize;
                 refreshAppearance();
+                // Rebuild menu to update ● markers
+                JPopupMenu newMenu = createPopupMenu();
+                installPetMenuAutoDismiss(newMenu);
+                contentPanel.setComponentPopupMenu(newMenu);
+                petLabel.setComponentPopupMenu(newMenu);
             });
             sizeMenu.add(sizeItem);
         }
         menu.add(sizeMenu);
 
-        // Opacity submenu
+        // Opacity submenu (single-select with ● prefix)
         JMenu opacityMenu = new JMenu(i18n.get("pet.opacity"));
         double[] opacities = {1.0, 0.9, 0.8, 0.6};
         String[] opacityLabels = {"100%", "90%", "80%", "60%"};
+        double currentOpacity = config.getDesktopPetOpacity();
         for (int i = 0; i < opacities.length; i++) {
-            JCheckBoxMenuItem opItem = new JCheckBoxMenuItem(
-                    opacityLabels[i], opacities[i] == config.getDesktopPetOpacity());
+            String label = (opacities[i] == currentOpacity ? "● " : "    " ) + opacityLabels[i];
+            JMenuItem opItem = new JMenuItem(label);
             double finalOp = opacities[i];
             opItem.addActionListener(e -> {
                 config.setDesktopPetOpacity(finalOp);
                 setOpacity((float) finalOp);
+                // Rebuild menu to update ● markers
+                JPopupMenu newMenu = createPopupMenu();
+                installPetMenuAutoDismiss(newMenu);
+                contentPanel.setComponentPopupMenu(newMenu);
+                petLabel.setComponentPopupMenu(newMenu);
             });
             opacityMenu.add(opItem);
         }

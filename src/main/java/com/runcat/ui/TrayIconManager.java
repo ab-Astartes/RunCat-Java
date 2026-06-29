@@ -182,18 +182,13 @@ public class TrayIconManager {
 
         JMenu themeMenu = new JMenu(i18n.get("menu.settings.iconTheme"));
         String[] themes = {"auto", "light", "dark"};
+        String currentTheme = config.getIconTheme();
         for (String theme : themes) {
-            JCheckBoxMenuItem themeItem = new JCheckBoxMenuItem(
-                    i18n.get("menu.settings.iconTheme." + theme),
-                    theme.equals(config.getIconTheme()));
-            themeItem.addItemListener(e -> {
-                if (themeItem.isSelected()) {
-                    config.setIconTheme(theme);
-                    uncheckOtherItems(themeMenu, themeItem);
-                    RunCatApp.restart();
-                } else if (theme.equals(config.getIconTheme())) {
-                    themeItem.setSelected(true);
-                }
+            String label = (theme.equals(currentTheme) ? "● " : "    " ) + i18n.get("menu.settings.iconTheme." + theme);
+            JMenuItem themeItem = new JMenuItem(label);
+            themeItem.addActionListener(e -> {
+                config.setIconTheme(theme);
+                RunCatApp.restart();
             });
             themeMenu.add(themeItem);
         }
@@ -223,22 +218,17 @@ public class TrayIconManager {
     }
 
     private void addAnimationItems(JMenu animationMenu) {
+        String currentAnim = config.getCurrentAnimation();
         for (Map.Entry<String, java.util.List<Image>> entry :
                 animationManager.getBuiltInAnimations().entrySet()) {
-            JCheckBoxMenuItem item = new JCheckBoxMenuItem(
-                    animationManager.getAnimationDisplayName(entry.getKey()),
-                    entry.getKey().equals(config.getCurrentAnimation()));
-            item.addItemListener(e -> {
-                if (item.isSelected()) {
-                    animationManager.setCurrentAnimation(entry.getKey());
-                    trayPlayback.reset();
-                    uncheckOtherItems(animationMenu, item);
-                    DesktopPetWindow.refreshIfShowing();
-                } else {
-                    if (entry.getKey().equals(config.getCurrentAnimation())) {
-                        item.setSelected(true);
-                    }
-                }
+            String name = animationManager.getAnimationDisplayName(entry.getKey());
+            String label = entry.getKey().equals(currentAnim) ? "● " + name : "    " + name;
+            JMenuItem item = new JMenuItem(label);
+            item.addActionListener(e -> {
+                animationManager.setCurrentAnimation(entry.getKey());
+                trayPlayback.reset();
+                rebuildMenu();
+                DesktopPetWindow.refreshIfShowing();
             });
             animationMenu.add(item);
         }
@@ -247,31 +237,16 @@ public class TrayIconManager {
         if (!customAnims.isEmpty()) {
             animationMenu.addSeparator();
             for (Map.Entry<String, java.util.List<Image>> entry : customAnims.entrySet()) {
-                JCheckBoxMenuItem item = new JCheckBoxMenuItem(
-                        animationManager.getAnimationDisplayName(entry.getKey()),
-                        entry.getKey().equals(config.getCurrentAnimation()));
-                item.addItemListener(e -> {
-                    if (item.isSelected()) {
-                        animationManager.setCurrentAnimation(entry.getKey());
-                        trayPlayback.reset();
-                        uncheckOtherItems(animationMenu, item);
-                        DesktopPetWindow.refreshIfShowing();
-                    } else {
-                        if (entry.getKey().equals(config.getCurrentAnimation())) {
-                            item.setSelected(true);
-                        }
-                    }
+                String name = animationManager.getAnimationDisplayName(entry.getKey());
+                String label = entry.getKey().equals(currentAnim) ? "● " + name : "    " + name;
+                JMenuItem item = new JMenuItem(label);
+                item.addActionListener(e -> {
+                    animationManager.setCurrentAnimation(entry.getKey());
+                    trayPlayback.reset();
+                    rebuildMenu();
+                    DesktopPetWindow.refreshIfShowing();
                 });
                 animationMenu.add(item);
-            }
-        }
-    }
-
-    private void uncheckOtherItems(JMenu animationMenu, JCheckBoxMenuItem selected) {
-        for (int i = 0; i < animationMenu.getItemCount(); i++) {
-            JMenuItem mi = animationMenu.getItem(i);
-            if (mi instanceof JCheckBoxMenuItem cb && cb != selected) {
-                cb.setSelected(false);
             }
         }
     }
@@ -280,86 +255,45 @@ public class TrayIconManager {
         I18nManager i18n = I18nManager.getInstance();
         double speed = config.getSpeedMultiplier();
 
-        JCheckBoxMenuItem slowItem = new JCheckBoxMenuItem(i18n.get("menu.speed.slow"), speed == 0.5);
-        slowItem.addItemListener(e -> {
-            if (slowItem.isSelected()) {
-                config.setSpeedMultiplier(0.5);
-                uncheckOtherItems(speedMenu, slowItem);
-            } else if (config.getSpeedMultiplier() == 0.5) {
-                slowItem.setSelected(true);
-            }
-        });
-        JCheckBoxMenuItem normalItem = new JCheckBoxMenuItem(i18n.get("menu.speed.normal"), speed == 1.0);
-        normalItem.addItemListener(e -> {
-            if (normalItem.isSelected()) {
-                config.setSpeedMultiplier(1.0);
-                uncheckOtherItems(speedMenu, normalItem);
-            } else if (config.getSpeedMultiplier() == 1.0) {
-                normalItem.setSelected(true);
-            }
-        });
-        JCheckBoxMenuItem fastItem = new JCheckBoxMenuItem(i18n.get("menu.speed.fast"), speed == 2.0);
-        fastItem.addItemListener(e -> {
-            if (fastItem.isSelected()) {
-                config.setSpeedMultiplier(2.0);
-                uncheckOtherItems(speedMenu, fastItem);
-            } else if (config.getSpeedMultiplier() == 2.0) {
-                fastItem.setSelected(true);
-            }
-        });
+        JMenuItem slowItem = new JMenuItem((speed == 0.5 ? "● " : "    " ) + i18n.get("menu.speed.slow"));
+        slowItem.addActionListener(e -> { config.setSpeedMultiplier(0.5); rebuildMenu(); });
+        JMenuItem normalItem = new JMenuItem((speed == 1.0 ? "● " : "    " ) + i18n.get("menu.speed.normal"));
+        normalItem.addActionListener(e -> { config.setSpeedMultiplier(1.0); rebuildMenu(); });
+        JMenuItem fastItem = new JMenuItem((speed == 2.0 ? "● " : "    " ) + i18n.get("menu.speed.fast"));
+        fastItem.addActionListener(e -> { config.setSpeedMultiplier(2.0); rebuildMenu(); });
         speedMenu.add(slowItem);
         speedMenu.add(normalItem);
         speedMenu.add(fastItem);
     }
 
     private void addTopProcessItems(JMenu topProcessMenu) {
+        int currentCount = config.getTopProcessCount();
         for (int count : new int[]{3, 5, 8}) {
-            JCheckBoxMenuItem item = new JCheckBoxMenuItem(
-                    count + " " + I18nManager.getInstance().get("menu.settings.topProcesses.suffix"),
-                    config.getTopProcessCount() == count);
-            item.addItemListener(e -> {
-                if (item.isSelected()) {
-                    config.setTopProcessCount(count);
-                    uncheckOtherItems(topProcessMenu, item);
-                } else if (config.getTopProcessCount() == count) {
-                    item.setSelected(true);
-                }
-            });
+            String label = (count == currentCount ? "● " : "    " ) + count + " " + I18nManager.getInstance().get("menu.settings.topProcesses.suffix");
+            JMenuItem item = new JMenuItem(label);
+            item.addActionListener(e -> { config.setTopProcessCount(count); rebuildMenu(); });
             topProcessMenu.add(item);
         }
     }
 
     private void addRefreshItems(JMenu refreshMenu) {
         int[] refreshValues = {1000, 2000, 5000};
+        int currentRefresh = config.getDashboardRefreshMs();
         for (int refreshValue : refreshValues) {
-            String label = (refreshValue / 1000) + "s";
-            JCheckBoxMenuItem item = new JCheckBoxMenuItem(label, config.getDashboardRefreshMs() == refreshValue);
-            item.addItemListener(e -> {
-                if (item.isSelected()) {
-                    config.setDashboardRefreshMs(refreshValue);
-                    uncheckOtherItems(refreshMenu, item);
-                } else if (config.getDashboardRefreshMs() == refreshValue) {
-                    item.setSelected(true);
-                }
-            });
+            String label = (refreshValue == currentRefresh ? "● " : "    " ) + (refreshValue / 1000) + "s";
+            JMenuItem item = new JMenuItem(label);
+            item.addActionListener(e -> { config.setDashboardRefreshMs(refreshValue); rebuildMenu(); });
             refreshMenu.add(item);
         }
     }
 
     private void addPetClickItems(JMenu petClickMenu) {
         String current = config.getDesktopPetClickAction();
+        I18nManager i18n = I18nManager.getInstance();
         for (String action : new String[]{"bounce", "dashboard"}) {
-            JCheckBoxMenuItem item = new JCheckBoxMenuItem(
-                    I18nManager.getInstance().get("menu.settings.petClickAction." + action),
-                    action.equals(current));
-            item.addItemListener(e -> {
-                if (item.isSelected()) {
-                    config.setDesktopPetClickAction(action);
-                    uncheckOtherItems(petClickMenu, item);
-                } else if (action.equals(config.getDesktopPetClickAction())) {
-                    item.setSelected(true);
-                }
-            });
+            String label = (action.equals(current) ? "● " : "    " ) + i18n.get("menu.settings.petClickAction." + action);
+            JMenuItem item = new JMenuItem(label);
+            item.addActionListener(e -> { config.setDesktopPetClickAction(action); rebuildMenu(); });
             petClickMenu.add(item);
         }
     }
