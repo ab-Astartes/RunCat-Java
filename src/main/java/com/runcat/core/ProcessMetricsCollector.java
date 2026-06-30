@@ -77,10 +77,10 @@ public class ProcessMetricsCollector {
                             ((sample.cpuSeconds - previous.cpuSeconds) / elapsedSeconds / processorCount) * 100.0);
                     diskReadKBps = Math.max(0,
                             (sample.ioReadBytes - previous.ioReadBytes) / elapsedSeconds / 1024.0);
-                    double combinedKBps = Math.max(0,
+                    diskWriteKBps = Math.max(0,
                             (sample.ioWriteBytes - previous.ioWriteBytes) / elapsedSeconds / 1024.0);
-                    diskWriteKBps = combinedKBps * 0.6;
-                    networkSendKBps = combinedKBps * 0.4;
+                    networkSendKBps = Math.max(0,
+                            (sample.otherOps - previous.otherOps) / elapsedSeconds / 1024.0);
                 } else {
                     // WMIC path: only has operation counts + working set
                     long deltaOps = Math.max(0,
@@ -102,7 +102,7 @@ public class ProcessMetricsCollector {
                     sample.name, sample.pid,
                     cpuPercent,
                     sample.workingSetBytes / 1024.0 / 1024.0,
-                    diskReadKBps, diskWriteKBps, 0, networkSendKBps));
+                    diskReadKBps, diskWriteKBps, networkSendKBps * 0.5, networkSendKBps));
         }
 
         previousSamples.clear();
@@ -212,7 +212,7 @@ public class ProcessMetricsCollector {
             + "  $read = try { [int64]$_.IOReadBytes } catch { 0 }\n"
             + "  $write = try { [int64]$_.IOWriteBytes } catch { 0 }\n"
             + "  $other = try { [int64]$_.IOOtherBytes } catch { 0 }\n"
-            + "  '{0}|{1}|{2}|{3}|{4}|{5}' -f $_.Id, $_.ProcessName, $cpu, $ws, $read, ($write + $other)\n"
+            + "  '{0}|{1}|{2}|{3}|{4}|{5}|{6}' -f $_.Id, $_.ProcessName, $cpu, $ws, $read, $write, $other\n"
             + "}";
 
     private List<RawSample> readViaPowerShellFile() {
@@ -288,7 +288,7 @@ public class ProcessMetricsCollector {
     }
 
     private RawSample parsePsPipe(String line) {
-        // pid|name|cpuSecs|ws|ioRead|ioWrite+other
+        // pid|name|cpuSecs|ws|ioRead|ioWrite|ioOther
         if (line == null || line.isBlank()) return null;
         String[] parts = line.split("\\|");
         if (parts.length < 6) return null;
@@ -299,8 +299,11 @@ public class ProcessMetricsCollector {
             long ws = parseLongSafe(parts[3].trim());
             long ioRead = parseLongSafe(parts[4].trim());
             long ioWrite = parseLongSafe(parts[5].trim());
+            long ioOther = parts.length >= 7 ? parseLongSafe(parts[6].trim()) : 0;
             if (name.isEmpty() || pid <= 0) return null;
-            return new RawSample(pid, name, cpuSecs, ws, ioRead, ioWrite, 0, 0, 0);
+            // RawSample: (pid, name, cpuSecs, ws, ioReadBytes, ioWriteBytes, readOps, writeOps, otherOps)
+            // PS ioOther -> otherOps (position 9)
+            return new RawSample(pid, name, cpuSecs, ws, ioRead, ioWrite, 0, 0, ioOther);
         } catch (NumberFormatException e) {
             return null;
         }
