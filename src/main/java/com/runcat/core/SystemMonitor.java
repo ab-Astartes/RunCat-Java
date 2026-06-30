@@ -204,7 +204,7 @@ public class SystemMonitor {
 
             long now = System.currentTimeMillis();
             double elapsed = (now - lastNetSampleTime) / 1000.0;
-            if (elapsed > 0 && lastNetBytesRecv > 0) {
+            if (elapsed > 0 && lastNetSampleTime > 0) {
                 netDownloadKBps = (totalRecv - lastNetBytesRecv) / 1024.0 / elapsed;
                 netUploadKBps = (totalSent - lastNetBytesSent) / 1024.0 / elapsed;
                 if (netDownloadKBps < 0) netDownloadKBps = 0;
@@ -265,7 +265,7 @@ public class SystemMonitor {
 
     public String getNetworkUsageText() {
         I18nManager i18n = I18nManager.getInstance();
-        if (lastNetBytesRecv <= 0) return i18n.get("monitor.notAvailable");
+        if (lastNetSampleTime <= 0) return i18n.get("monitor.notAvailable");
         return String.format(i18n.get("monitor.netFormat"), Math.max(0, netDownloadKBps), Math.max(0, netUploadKBps));
     }
 
